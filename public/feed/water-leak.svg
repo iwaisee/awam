@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" preserveAspectRatio="xMidYMid slice" role="img">
+  <defs>
+    <linearGradient id="asphalt" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5d656d"/>
+      <stop offset="1" stop-color="#3e464e"/>
+    </linearGradient>
+    <linearGradient id="wall" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#b2b7ba"/>
+      <stop offset="1" stop-color="#9aa0a3"/>
+    </linearGradient>
+    <linearGradient id="pool" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#a9bfc6"/>
+      <stop offset="0.5" stop-color="#7d9aa4"/>
+      <stop offset="1" stop-color="#5e7d88"/>
+    </linearGradient>
+    <radialGradient id="vig" cx="48%" cy="44%" r="78%">
+      <stop offset="0.55" stop-color="#000000" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.26"/>
+    </radialGradient>
+    <filter id="grain" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="2" stitchTiles="stitch"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0.9 0.9 0.9 0 0"/>
+    </filter>
+    <filter id="soft" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="7"/>
+    </filter>
+  </defs>
+
+  <!-- street corner asphalt -->
+  <rect width="800" height="600" fill="url(#asphalt)"/>
+  <path d="M 60 600 C 110 470 160 360 210 260" stroke="#343c44" stroke-width="26" fill="none" opacity="0.16"/>
+
+  <!-- compound wall on the right -->
+  <rect x="596" y="0" width="204" height="600" fill="url(#wall)"/>
+  <rect x="596" y="0" width="10" height="600" fill="#7f8588"/>
+  <g stroke="#8b9194" stroke-width="3" opacity="0.7">
+    <line x1="640" y1="0" x2="640" y2="600"/>
+    <line x1="700" y1="0" x2="700" y2="600"/>
+    <line x1="760" y1="0" x2="760" y2="600"/>
+    <line x1="596" y1="120" x2="800" y2="120"/>
+    <line x1="596" y1="300" x2="800" y2="300"/>
+    <line x1="596" y1="480" x2="800" y2="480"/>
+  </g>
+  <!-- damp stain climbing the wall -->
+  <path d="M 596 320 q 60 30 120 18 q 50 -10 84 6 l 0 256 l -204 0 Z" fill="#7e8b8d" opacity="0.45" filter="url(#soft)"/>
+
+  <!-- leaking pipe joint from the wall -->
+  <g>
+    <rect x="540" y="252" width="70" height="26" rx="6" fill="#7d848a"/>
+    <rect x="588" y="246" width="30" height="38" rx="7" fill="#6a7178"/>
+    <rect x="540" y="250" width="70" height="8" rx="4" fill="#98a0a5"/>
+    <path d="M 540 268 q -12 8 -10 22" stroke="#5d8a99" stroke-width="7" fill="none" stroke-linecap="round"/>
+  </g>
+
+  <!-- spreading pool of clean water -->
+  <path d="M 96 470 C 170 430 280 415 380 428 C 470 438 560 420 610 400 C 640 410 660 440 640 470 C 600 520 470 540 340 536 C 220 532 120 520 96 470 Z" fill="url(#pool)" opacity="0.9"/>
+  <!-- wall reflection in water -->
+  <path d="M 600 402 l 26 -6 l 10 62 l -30 8 Z" fill="#c3cbd0" opacity="0.4"/>
+  <!-- ripples near the pipe -->
+  <g fill="none" stroke="#eaf2f4" stroke-linecap="round">
+    <ellipse cx="580" cy="428" rx="34" ry="9" stroke-width="4" opacity="0.5"/>
+    <ellipse cx="576" cy="428" rx="64" ry="16" stroke-width="3" opacity="0.32"/>
+    <ellipse cx="570" cy="430" rx="98" ry="24" stroke-width="2.5" opacity="0.2"/>
+  </g>
+  <!-- wind streaks -->
+  <g stroke="#e8f0f2" stroke-width="4" stroke-linecap="round" opacity="0.45">
+    <path d="M 180 470 q 60 -10 120 -2"/>
+    <path d="M 250 500 q 80 -8 150 2"/>
+    <path d="M 380 466 q 60 -8 110 0"/>
+  </g>
+  <!-- wet sheen beyond the pool -->
+  <path d="M 120 460 q 130 -40 300 -30" stroke="#8b979c" stroke-width="16" fill="none" opacity="0.25" filter="url(#soft)"/>
+
+  <rect width="800" height="600" filter="url(#grain)" opacity="0.08"/>
+  <rect width="800" height="600" fill="url(#vig)"/>
+</svg>

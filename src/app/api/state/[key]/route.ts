@@ -1,0 +1,64 @@
+import { NextResponse } from "next/server";
+import { readState, writeState } from "@/lib/appStateDb";
+
+/* Shared application state transport. Keys are whitelisted — anything a
+   browser can push must be a documented shared document. */
+
+const ALLOWED_KEYS = new Set(["coverage", "system-prefs", "admin-profile"]);
+
+export async function GET(
+  _request: Request,
+  { params }: { params: Promise<{ key: string }> },
+) {
+  const { key } = await params;
+  if (!ALLOWED_KEYS.has(key)) {
+    return NextResponse.json(
+      { success: false, error: "Unknown state key." },
+      { status: 404 },
+    );
+  }
+  const value = readState(key);
+  return NextResponse.json({ value, seeded: value !== null });
+}
+
+export async function PUT(
+  request: Request,
+  { params }: { params: Promise<{ key: string }> },
+) {
+  const { key } = await params;
+  if (!ALLOWED_KEYS.has(key)) {
+    return NextResponse.json(
+      { success: false, error: "Unknown state key." },
+      { status: 404 },
+    );
+  }
+  try {
+    const body = (await request.json()) as { value?: unknown };
+    if (typeof body.value === "undefined") {
+      return NextResponse.json(
+        { success: false, error: "Missing state value." },
+        { status: 400 },
+      );
+    }
+    const serialized = JSON.stringify(body.value);
+    if (serialized.length > 8_000_000) {
+      return NextResponse.json(
+        { success: false, error: "State value too large." },
+        { status: 413 },
+      );
+    }
+    writeState(key, body.value);
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        success: false,
+        error:
+          error instanceof Error
+            ? `Could not save state: ${error.message}`
+            : "Could not save state.",
+      },
+      { status: 500 },
+    );
+  }
+}

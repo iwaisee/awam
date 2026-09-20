@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" preserveAspectRatio="xMidYMid slice" role="img">
+  <defs>
+    <linearGradient id="asphalt" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#666e76"/>
+      <stop offset="1" stop-color="#3f474f"/>
+    </linearGradient>
+    <radialGradient id="pit" cx="50%" cy="46%" r="62%">
+      <stop offset="0" stop-color="#0b0f14"/>
+      <stop offset="0.72" stop-color="#151b22"/>
+      <stop offset="1" stop-color="#232b33"/>
+    </radialGradient>
+    <radialGradient id="vig" cx="50%" cy="46%" r="78%">
+      <stop offset="0.5" stop-color="#000000" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.28"/>
+    </radialGradient>
+    <filter id="grain" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="2" stitchTiles="stitch"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0.9 0.9 0.9 0 0"/>
+    </filter>
+    <filter id="soft" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="7"/>
+    </filter>
+  </defs>
+
+  <!-- worn asphalt -->
+  <rect width="800" height="600" fill="url(#asphalt)"/>
+  <path d="M 90 600 C 150 430 210 300 260 180" stroke="#343c44" stroke-width="30" fill="none" opacity="0.22"/>
+  <path d="M 660 600 C 610 440 570 320 540 200" stroke="#343c44" stroke-width="24" fill="none" opacity="0.18"/>
+
+  <!-- faint painted hazard arcs -->
+  <path d="M 150 130 A 260 200 0 0 1 650 130" stroke="#d8d6cc" stroke-width="9" fill="none" opacity="0.2" stroke-dasharray="34 26"/>
+
+  <!-- concrete apron around manhole -->
+  <circle cx="392" cy="330" r="168" fill="#868d93"/>
+  <circle cx="392" cy="330" r="168" fill="none" stroke="#565d64" stroke-width="6" opacity="0.7"/>
+  <circle cx="392" cy="326" r="150" fill="#93989d"/>
+
+  <!-- lifted steel rim -->
+  <circle cx="392" cy="326" r="128" fill="#4e555c"/>
+  <circle cx="392" cy="326" r="112" fill="#333a41"/>
+  <circle cx="392" cy="322" r="104" fill="url(#pit)"/>
+  <!-- rim bolts -->
+  <g fill="#6d747b">
+    <circle cx="392" cy="212" r="7"/>
+    <circle cx="492" cy="252" r="7"/>
+    <circle cx="516" cy="342" r="7"/>
+    <circle cx="452" cy="422" r="7"/>
+    <circle cx="332" cy="422" r="7"/>
+    <circle cx="268" cy="342" r="7"/>
+    <circle cx="292" cy="252" r="7"/>
+  </g>
+  <!-- scrapes where cover was pried -->
+  <path d="M 300 208 L 352 176" stroke="#20262c" stroke-width="8" stroke-linecap="round" opacity="0.5"/>
+
+  <!-- traffic cone -->
+  <g>
+    <ellipse cx="608" cy="430" rx="58" ry="14" fill="#1d2227" opacity="0.45" filter="url(#soft)"/>
+    <polygon points="608,320 572,424 644,424" fill="#d9662a"/>
+    <polygon points="608,320 596,356 620,356" fill="#b34e1c"/>
+    <path d="M 581 384 L 635 384 L 640 400 L 576 400 Z" fill="#e9e7df"/>
+    <rect x="562" y="422" width="92" height="12" rx="6" fill="#c05a22"/>
+  </g>
+
+  <!-- scattered grit -->
+  <g fill="#2c333a" opacity="0.5">
+    <ellipse cx="180" cy="470" rx="10" ry="6"/>
+    <ellipse cx="250" cy="530" rx="7" ry="5"/>
+    <ellipse cx="540" cy="180" rx="9" ry="5"/>
+    <ellipse cx="680" cy="250" rx="6" ry="4"/>
+  </g>
+
+  <rect width="800" height="600" filter="url(#grain)" opacity="0.09"/>
+  <rect width="800" height="600" fill="url(#vig)"/>
+</svg>

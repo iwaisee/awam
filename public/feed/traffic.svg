@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" preserveAspectRatio="xMidYMid slice" role="img">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#dfe5e9"/>
+      <stop offset="1" stop-color="#eef0f2"/>
+    </linearGradient>
+    <linearGradient id="asphalt" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#676f77"/>
+      <stop offset="1" stop-color="#414950"/>
+    </linearGradient>
+    <radialGradient id="vig" cx="50%" cy="44%" r="78%">
+      <stop offset="0.55" stop-color="#000000" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.26"/>
+    </radialGradient>
+    <filter id="grain" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="2" stitchTiles="stitch"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0.9 0.9 0.9 0 0"/>
+    </filter>
+    <filter id="soft" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="9"/>
+    </filter>
+  </defs>
+
+  <!-- sky + horizon buildings -->
+  <rect width="800" height="250" fill="url(#sky)"/>
+  <rect x="0" y="208" width="800" height="42" fill="#a9b0b5"/>
+  <rect x="60" y="180" width="70" height="40" fill="#9ba3a9"/>
+  <rect x="360" y="172" width="90" height="46" fill="#a1a9ae"/>
+  <rect x="620" y="184" width="80" height="38" fill="#9aa2a8"/>
+  <rect x="0" y="242" width="800" height="360" fill="url(#asphalt)"/>
+
+  <!-- zebra crossing, perspective -->
+  <g fill="#e6e6e0" opacity="0.88">
+    <polygon points="70,600 130,600 168,470 122,470"/>
+    <polygon points="210,600 270,600 296,470 252,470"/>
+    <polygon points="350,600 410,600 424,470 382,470"/>
+    <polygon points="490,600 550,600 552,470 512,470"/>
+    <polygon points="630,600 690,600 680,470 642,470"/>
+  </g>
+  <!-- stop line -->
+  <rect x="0" y="428" width="800" height="14" fill="#e6e6e0" opacity="0.55"/>
+
+  <!-- signal pole with mast arm -->
+  <rect x="620" y="120" width="18" height="500" fill="#5f666d"/>
+  <rect x="620" y="120" width="6" height="500" fill="#787f86"/>
+  <path d="M 638 132 Q 560 96 460 100 L 460 122 Q 558 118 638 154 Z" fill="#596067"/>
+  <ellipse cx="629" cy="620" rx="120" ry="22" fill="#1d2227" opacity="0.35" filter="url(#soft)"/>
+
+  <!-- dead signal head -->
+  <g>
+    <rect x="418" y="96" width="86" height="200" rx="14" fill="#272d34"/>
+    <rect x="426" y="104" width="70" height="184" rx="10" fill="#1e242a"/>
+    <!-- unlit lenses -->
+    <circle cx="461" cy="140" r="24" fill="#4a3034"/>
+    <circle cx="461" cy="200" r="24" fill="#4d4531"/>
+    <circle cx="461" cy="260" r="24" fill="#2f4636"/>
+    <circle cx="455" cy="133" r="7" fill="#5d444a" opacity="0.7"/>
+    <!-- visors -->
+    <path d="M 434 122 a 27 27 0 0 1 54 0 l -6 0 a 21 21 0 0 0 -42 0 Z" fill="#171c21"/>
+    <path d="M 434 182 a 27 27 0 0 1 54 0 l -6 0 a 21 21 0 0 0 -42 0 Z" fill="#171c21"/>
+    <path d="M 434 242 a 27 27 0 0 1 54 0 l -6 0 a 21 21 0 0 0 -42 0 Z" fill="#171c21"/>
+  </g>
+  <!-- pedestrian signal box on pole -->
+  <rect x="600" y="300" width="58" height="84" rx="10" fill="#4c5359"/>
+  <rect x="608" y="310" width="42" height="52" rx="6" fill="#3a4147"/>
+
+  <!-- grime streaks -->
+  <path d="M 80 600 C 120 500 150 420 180 340" stroke="#39414a" stroke-width="24" fill="none" opacity="0.15"/>
+
+  <rect width="800" height="600" filter="url(#grain)" opacity="0.08"/>
+  <rect width="800" height="600" fill="url(#vig)"/>
+</svg>

@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" preserveAspectRatio="xMidYMid slice" role="img">
+  <defs>
+    <linearGradient id="dusk" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#394661"/>
+      <stop offset="0.45" stop-color="#5d6479"/>
+      <stop offset="0.72" stop-color="#a97f6f"/>
+      <stop offset="0.82" stop-color="#c99a6e"/>
+      <stop offset="1" stop-color="#2c333c"/>
+    </linearGradient>
+    <linearGradient id="nightroad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#343b44"/>
+      <stop offset="1" stop-color="#232930"/>
+    </linearGradient>
+    <radialGradient id="lampglow" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#ffe4a1" stop-opacity="0.85"/>
+      <stop offset="0.35" stop-color="#ffd98a" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#ffd98a" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="vig" cx="50%" cy="44%" r="80%">
+      <stop offset="0.5" stop-color="#000000" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.32"/>
+    </radialGradient>
+    <filter id="grain" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="2" stitchTiles="stitch"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0.9 0.9 0.9 0 0"/>
+    </filter>
+    <filter id="soft" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="12"/>
+    </filter>
+  </defs>
+
+  <!-- dusk sky -->
+  <rect width="800" height="470" fill="url(#dusk)"/>
+  <circle cx="640" cy="330" r="34" fill="#f4c98a" opacity="0.85" filter="url(#soft)"/>
+
+  <!-- skyline silhouettes -->
+  <g fill="#2a3140">
+    <rect x="0" y="388" width="130" height="82"/>
+    <polygon points="150,470 150,412 200,392 250,412 250,470"/>
+    <rect x="270" y="428" width="90" height="42"/>
+    <rect x="390" y="404" width="70" height="66"/>
+    <polygon points="480,470 480,418 520,398 560,418 560,470"/>
+    <rect x="580" y="432" width="100" height="38"/>
+    <rect x="700" y="408" width="100" height="62"/>
+  </g>
+  <!-- lit windows -->
+  <g fill="#f3d089" opacity="0.8">
+    <rect x="22" y="410" width="9" height="12"/>
+    <rect x="58" y="432" width="9" height="12"/>
+    <rect x="96" y="416" width="9" height="12"/>
+    <rect x="410" y="424" width="8" height="11"/>
+    <rect x="434" y="446" width="8" height="11"/>
+    <rect x="724" y="428" width="9" height="12"/>
+  </g>
+
+  <!-- road -->
+  <rect x="0" y="470" width="800" height="130" fill="url(#nightroad)"/>
+  <g fill="#d9d9d2" opacity="0.5">
+    <rect x="120" y="540" width="60" height="9" rx="4"/>
+    <rect x="330" y="560" width="80" height="11" rx="5"/>
+    <rect x="580" y="545" width="60" height="9" rx="4"/>
+  </g>
+
+  <!-- streetlight pole -->
+  <rect x="322" y="150" width="14" height="330" fill="#20262c"/>
+  <path d="M 336 156 Q 336 120 380 118 L 470 118 Q 486 120 486 138 L 470 138 Q 452 134 470 132 L 382 134 Q 352 136 352 158 Z" fill="#20262c"/>
+  <!-- lamp head -->
+  <rect x="430" y="120" width="76" height="30" rx="12" fill="#191e24"/>
+  <ellipse cx="468" cy="152" rx="30" ry="10" fill="#ffdf9e"/>
+  <!-- glow -->
+  <circle cx="468" cy="156" r="110" fill="url(#lampglow)"/>
+  <!-- light cone onto road -->
+  <polygon points="436,158 500,158 620,470 320,470" fill="#ffdf9e" opacity="0.14" filter="url(#soft)"/>
+  <!-- pool of light on asphalt -->
+  <ellipse cx="468" cy="486" rx="150" ry="30" fill="#ffe2a0" opacity="0.18" filter="url(#soft)"/>
+
+  <rect width="800" height="600" filter="url(#grain)" opacity="0.08"/>
+  <rect width="800" height="600" fill="url(#vig)"/>
+</svg>

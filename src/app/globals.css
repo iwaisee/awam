@@ -1,26 +1,162 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+@theme {
+  /* Sada-e-Awam design tokens (DESIGN.md) */
+  --color-primary: #0f5132;
+  --color-primary-dark: #003820;
+  --color-on-primary: #ffffff;
+  --color-primary-soft: #b0f1c7;
+  --color-primary-tint: #e6f4ec;
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+  --color-canvas: #f8f9fa;
+  --color-card: #ffffff;
+  --color-line: #e5e7eb;
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-ink: #151c27;
+  --color-ink-soft: #404942;
+  --color-ink-muted: #9ca3af;
+
+  --color-danger: #dc2626;
+  --color-danger-tint: #ffdad6;
+  --color-warning: #d97706;
+  --color-warning-tint: #fef3c7;
+  --color-success: #0f5132;
+  --color-info: #1d70b8;
+
+  --font-heading: var(--font-hanken), ui-sans-serif, system-ui, sans-serif;
+  --font-body: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
+
+  --radius-btn: 0.5rem;
+  --radius-card-lg: 1rem;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-body);
+}
+
+/* Tailwind v4 preflight stopped forcing the pointer cursor on buttons
+   (v3 behavior). Restore the hand cursor on every interactive control;
+   :not(:disabled) keeps disabled buttons on the default arrow. */
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
+.urdu {
+  font-family: "Noto Sans Arabic", var(--font-hanken), sans-serif;
+  line-height: 2;
+  direction: rtl;
+}
+
+/* Floating sync toast (Settings → Administrator Identity) */
+@keyframes toast-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-toast-rise {
+  animation: toast-rise 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Auth card view swap (Sign In ↔ Sign Up remount) */
+@keyframes fade-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-rise {
+  animation: fade-rise 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Tracking dossier swap (hub → result state and ticket → ticket) */
+@keyframes dossier-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* "backwards" (not "both") — a forwards fill would hold the to-state's
+   transform on the element forever, turning it into the containing block for
+   position:fixed descendants (e.g. the WorkOrderDrawer overlay/panel) and
+   pinning them to this wrapper instead of the viewport. The to-state equals
+   the natural style, so nothing needs to be held. */
+.animate-dossier-in {
+  animation: dossier-in 0.35s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+
+/* The waitlist modal uses tailwindcss-animate entrance utilities
+   (animate-in fade-in zoom-in-95) that Tailwind v4 core does not ship —
+   these provide the equivalent fade + 95% zoom entrance. */
+@keyframes modal-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-in {
+  animation: modal-enter 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes overlay-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-overlay-in {
+  animation: overlay-enter 0.2s ease-out both;
+}
+
+/* Feed Work Order slide-over uses pure transform/opacity transitions
+   (GPU-accelerated) from WorkOrderDrawer.tsx — no keyframes needed. */
+
+/* --------------------------- Native select reset --------------------------- */
+/* The browser's stock dropdown arrow renders misaligned inside our padded,
+   rounded form selects (macOS/WebKit draws it half-clipped at the edge).
+   Strip the native chrome everywhere and draw one consistent chevron —
+   multiple-selects keep native UI. */
+
+select:not([multiple]):not([size]) {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.65rem center;
+  background-size: 0.95rem 0.95rem;
+  padding-right: 2.25rem;
+}
+
+[dir="rtl"] select:not([multiple]):not([size]) {
+  background-position: left 0.65rem center;
+  padding-right: 0.75rem;
+  padding-left: 2.25rem;
 }

@@ -39,4 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
-data/
+
+# runtime sqlite stores (root only — src/data holds committed seed modules)
+# /data/

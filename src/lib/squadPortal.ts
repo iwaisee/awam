@@ -100,7 +100,9 @@ export function readSquadSession(): SquadSession | null {
   );
 }
 
-/** Bind the portal to a registry squad. Throws when the id is unknown. */
+/** Bind the portal to a registry squad. Throws when the id is unknown.
+    A fresh binding starts Active in Field and mirrors that into the
+    registry roster so the admin board never shows a stale duty state. */
 export function bindSquadSession(squadId: string): SquadSession {
   const resolved = findSquadInRegistry(squadId);
   if (!resolved) throw new Error(`No field squad found for id ${squadId}.`);
@@ -111,11 +113,35 @@ export function bindSquadSession(squadId: string): SquadSession {
     availability: session.availability,
     boundAt,
   });
+  mirrorAvailabilityToRegistry(session.squadId, session.availability);
   return session;
 }
 
 export function unbindSquadSession(): void {
   writeState(STATE_KEY, null);
+}
+
+/** Write the roster-facing status for a squad into the departments registry.
+    Best-effort: the session document always carries the truth for /squad. */
+function mirrorAvailabilityToRegistry(
+  squadId: string,
+  availability: SquadAvailability,
+): void {
+  const registry = readRegistry();
+  if (!Array.isArray(registry)) return;
+  const next = registry as CoreSector[];
+  for (const sector of next) {
+    for (const agency of sector.agencies) {
+      for (const op of agency.districtOperations) {
+        const squad = op.squads.find((s) => s.id === squadId);
+        if (squad) {
+          squad.status = SQUAD_AVAILABILITY[availability].registry;
+          writeRegistry(next);
+          return;
+        }
+      }
+    }
+  }
 }
 
 /** Flip field availability and mirror the roster-facing status back into the
@@ -130,23 +156,6 @@ export function setSquadAvailability(
     availability,
     boundAt: session.boundAt,
   });
-
-  const registry = readRegistry();
-  if (Array.isArray(registry)) {
-    const next = registry as CoreSector[];
-    for (const sector of next) {
-      for (const agency of sector.agencies) {
-        for (const op of agency.districtOperations) {
-          const squad = op.squads.find((s) => s.id === session.squadId);
-          if (squad) {
-            squad.status = SQUAD_AVAILABILITY[availability].registry;
-            writeRegistry(next);
-            return { ...session, availability };
-          }
-        }
-      }
-    }
-  }
-  // Registry unreachable/missing — the session doc still carries the state.
+  mirrorAvailabilityToRegistry(session.squadId, availability);
   return { ...session, availability };
 }

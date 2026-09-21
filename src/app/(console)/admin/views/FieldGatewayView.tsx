@@ -29,6 +29,7 @@ import { useDepartmentRegistry } from "@/hooks/useDepartmentRegistry";
 import { announceRegistryUpdate, pushRegistry } from "@/lib/registryClient";
 import type { CoreSector } from "@/data/departmentRegistry";
 import { shiftLabelOf, workforceLabel } from "@/components/admin/departmentMeta";
+import { ACCESS_CODE_PATTERN } from "@/lib/squadFields";
 import { WardAreaEditor } from "@/components/admin/DepartmentManager";
 
 /* ----------------------------------------------------------------------------
@@ -66,22 +67,29 @@ const UNIT_STATUS: Record<
   },
 };
 
-type AgencyKey = "MCS" | "GEPCO" | "SWMC" | "CANTT";
-
-const AGENCY_FILTERS: { key: AgencyKey | "all"; label: string }[] = [
-  { key: "all", label: "All Urgent" },
-  { key: "SWMC", label: "SWMC Sanitation" },
-  { key: "MCS", label: "MCS Drainage" },
-  { key: "GEPCO", label: "GEPCO Power" },
-];
-
-/** Ledger agency strings each filter key covers. */
-const LEDGER_AGENCY_MATCH: Record<AgencyKey, string[]> = {
-  MCS: ["MCS", "Municipal Corporation"],
-  GEPCO: ["GEPCO", "LESCO"],
-  SWMC: ["SWMC", "LWMC"],
-  CANTT: ["Cantonment", "Cantt", "CTP"],
+/** Ledger agency strings each sector's filter chip covers. Mirrors the
+    registry's agency codes (departmentRegistry.ts) so a ticket filed under
+    any department routes to its sector's crews. */
+const LEDGER_SECTOR_MATCH: Record<string, string[]> = {
+  power: ["GEPCO", "LESCO", "IESCO", "FESCO", "MEPCO", "PESCO", "HAZECO", "TESCO", "HESCO", "SEPCO", "QESCO"],
+  waste: ["SWMC", "LWMC", "GWMC", "RWMC", "FWMC", "SSWMB"],
+  water: ["WASA", "KW&SC", "WSSC"],
+  emergency: ["Rescue", "PDMA"],
+  traffic: ["CTP", "TEPA", "Traffic"],
+  municipal: ["MCS", "Municipal Corporation", "Cantonment", "Cantt", "CB", "MCL", "CDA"],
+  roads: ["C&W", "Highways", "MCL Roads"],
+  horticulture: ["PHA", "Parks", "Horticulture"],
+  gas: ["SNGPL"],
 };
+
+/** Does a triage ticket's ledger agency string belong to this sector?
+    Unknown slugs ("all", or a future sector) never hide tickets. */
+function sectorMatches(sectorSlug: string, ledgerAgency: string): boolean {
+  const needles = LEDGER_SECTOR_MATCH[sectorSlug];
+  if (!needles) return true;
+  const haystack = ledgerAgency.toLowerCase();
+  return needles.some((needle) => haystack.includes(needle.toLowerCase()));
+}
 
 interface FieldUnit {
   id: string;
@@ -89,7 +97,12 @@ interface FieldUnit {
   vehicle: string;
   vehicleShort: string;
   reg: string;
-  agency: AgencyKey;
+  /** Owning registry agency's code (e.g. "SWMC", "WASA-SKT"). */
+  agency: string;
+  /** Sector slug of the owning agency (drives the department filter chips). */
+  sector: string;
+  /** Division district — the fallback territory for district-wide crews. */
+  district: string;
   crewLead: string;
   crewDetail: string;
   phone: string;
@@ -113,16 +126,6 @@ interface ActiveJob {
   token?: string;
 }
 
-/* Agency bucket for the registry codes — the gateway's four pilot desks. */
-function agencyKeyFor(code: string): AgencyKey | null {
-  const c = code.toLowerCase();
-  if (c === "gepco") return "GEPCO";
-  if (c.startsWith("swmc")) return "SWMC";
-  if (c.startsWith("mcs")) return "MCS";
-  if (c.startsWith("cb") || c.includes("cantt")) return "CANTT";
-  return null;
-}
-
 function squadId(): string {
   return `sq-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 }
@@ -135,8 +138,6 @@ function buildUnits(
   const units: FieldUnit[] = [];
   for (const sector of sectors) {
     for (const agency of sector.agencies) {
-      const key = agencyKeyFor(agency.code);
-      if (!key) continue;
       for (const op of agency.districtOperations) {
         for (const sq of op.squads) {
           const assigned = (r: IncidentReport) =>
@@ -158,7 +159,9 @@ function buildUnits(
             vehicle: sq.vehiclePlate ?? "Unassigned vehicle",
             vehicleShort: sq.vehiclePlate?.split(/[-\u2013]/)[0]?.trim() ?? "—",
             reg: sq.vehiclePlate ?? "—",
-            agency: key,
+            agency: agency.code,
+            sector: sector.slug,
+            district: op.district,
             crewLead: sq.leadTechnician,
             crewDetail: `${sq.membersCount} personnel`,
             phone: sq.phone,
@@ -194,6 +197,9 @@ interface DispatchCandidate {
   agency: string;
   title: string;
   area: string;
+  /** Raw territory fields — drive the crew serving-area match. */
+  areaName: string;
+  cityName: string;
   urgency: IncidentReport["urgency"];
   slaDeadlineMs: number;
   ageLabel: string;
@@ -207,6 +213,8 @@ function toCandidate(r: IncidentReport): DispatchCandidate {
     agency: r.assigned_agency,
     title: r.category_title,
     area: [r.area_name, r.city_name].filter(Boolean).join(", "),
+    areaName: r.area_name,
+    cityName: r.city_name,
     urgency: r.urgency,
     slaDeadlineMs: new Date(r.sla_deadline).getTime(),
     ageLabel: ageLabel(r.created_at),
@@ -228,13 +236,31 @@ function ageLabel(iso: string): string {
 
 /* Registry writes from the gateway — a squad registered here lands in the
    first division of its agency (the departments console can move it later). */
+
+/** Issue/rotate the /squad sign-in credential for a crew (server-side store). */
+async function putSquadAccessCode(
+  squadId: string,
+  code: string,
+): Promise<boolean> {
+  try {
+    const res = await fetch("/api/squad/access", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ squadId, code }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 function addSquadToRegistry(
   sectors: CoreSector[],
   unit: FieldUnit,
 ): CoreSector[] | null {
   const agency = sectors
     .flatMap((s) => s.agencies)
-    .find((a) => agencyKeyFor(a.code) === unit.agency);
+    .find((a) => a.code === unit.agency);
   if (!agency || agency.districtOperations.length === 0) return null;
   const next: CoreSector[] = structuredClone(sectors);
   const target = next.flatMap((s) => s.agencies).find((a) => a.id === agency.id);
@@ -303,19 +329,8 @@ function pseudoDistanceMeters(candidateId: string, unitId: string): number {
   return 400 + (hash % 29) * 50;
 }
 
-function agencyMatches(
-  filter: AgencyKey | "all",
-  ledgerAgency: string,
-): boolean {
-  if (filter === "all") return true;
-  const haystack = ledgerAgency.toLowerCase();
-  return LEDGER_AGENCY_MATCH[filter].some((needle) =>
-    haystack.includes(needle.toLowerCase()),
-  );
-}
-
 function scoreUnit(candidate: DispatchCandidate, unit: FieldUnit): number {
-  const agencyMatch = agencyMatches(unit.agency, candidate.agency) ? 120 : 0;
+  const agencyMatch = sectorMatches(unit.sector, candidate.agency) ? 120 : 0;
   const zoneWords = candidate.area
     .toLowerCase()
     .split(/[^a-z]+/)
@@ -337,6 +352,31 @@ function scoreUnit(candidate: DispatchCandidate, unit: FieldUnit): number {
     availability -
     pseudoDistanceMeters(candidate.id, unit.id) / 50
   );
+}
+
+/** Territory rule — a crew covers the report only when one of its serving
+    wards names the reported area (exact, or a substring match in either
+    direction, guarded against short fragments). A crew with no wards is a
+    district-wide desk and covers every area in its division's district. */
+function unitServesReport(
+  unit: FieldUnit,
+  areaName: string,
+  cityName: string,
+): boolean {
+  const area = areaName.trim().toLowerCase();
+  if (!area) return true;
+  if (unit.wards && unit.wards.length > 0) {
+    return unit.wards.some((ward) => {
+      const w = ward.trim().toLowerCase();
+      if (!w) return false;
+      return (
+        w === area ||
+        (w.length >= 4 && area.includes(w)) ||
+        (area.length >= 4 && w.includes(area))
+      );
+    });
+  }
+  return unit.district.trim().toLowerCase() === cityName.trim().toLowerCase();
 }
 
 /** Shared popover plumbing: outside-click + Escape dismissal. */
@@ -386,7 +426,7 @@ export default function FieldGatewayView() {
     () => buildUnits(sectors, reports ?? [], overlays),
     [sectors, reports, overlays],
   );
-  const [agencyFilter, setAgencyFilter] = useState<AgencyKey | "all">("all");
+  const [agencyFilter, setAgencyFilter] = useState<string | "all">("all");
   const [search, setSearch] = useState("");
   const [now, setNow] = useState(() => Date.now());
   const [toast, setToast] = useState<string | null>(null);
@@ -442,6 +482,45 @@ export default function FieldGatewayView() {
   const activeUnits = units.filter((u) => u.status !== "off_duty");
   const onSiteCount = units.filter((u) => u.status === "on_site").length;
   const offDutyCount = units.filter((u) => u.status === "off_duty").length;
+  /** Department chips mirror the sectors that actually field squads. */
+  const departmentFilters = useMemo(
+    () =>
+      sectors
+        .filter((s) => units.some((u) => u.sector === s.slug))
+        .map((s) => ({ key: s.slug, label: s.name })),
+    [sectors, units],
+  );
+  /* Executive KPI dock — every figure derives from the live ledger:
+     dispatch latency from filed→dispatched stamps, today's closures from
+     resolution stamps, and the geotag rate from report coordinates. */
+  const kpi = useMemo(() => {
+    const rows = reports ?? [];
+    const arrivals = rows.flatMap((r) =>
+      r.dispatched_at
+        ? [
+            (new Date(r.dispatched_at).getTime() -
+              new Date(r.created_at).getTime()) /
+              60_000,
+          ]
+        : [],
+    );
+    const avgArrivalMin = arrivals.length
+      ? Math.round(arrivals.reduce((sum, m) => sum + m, 0) / arrivals.length)
+      : null;
+    const dayStart = new Date();
+    dayStart.setHours(0, 0, 0, 0);
+    const fixedToday = rows.filter((r) => {
+      if (!r.resolved_at) return false;
+      const resolvedOn = new Date(r.resolved_at);
+      return !Number.isNaN(resolvedOn.getTime()) && resolvedOn >= dayStart;
+    }).length;
+    const geotaggedPct = rows.length
+      ? Math.round(
+          (rows.filter((r) => r.coordinates).length / rows.length) * 100,
+        )
+      : null;
+    return { avgArrivalMin, fixedToday, geotaggedPct };
+  }, [reports]);
 
   const candidates = useMemo(
     () =>
@@ -465,7 +544,7 @@ export default function FieldGatewayView() {
     if (!candidates) return [];
     const needle = search.trim().replace(/^#/, "").toLowerCase();
     return candidates.filter((c) => {
-      if (!agencyMatches(agencyFilter, c.agency)) return false;
+      if (!sectorMatches(agencyFilter, c.agency)) return false;
       if (!needle) return true;
       return (
         c.id.toLowerCase().includes(needle) ||
@@ -520,6 +599,7 @@ export default function FieldGatewayView() {
                 status: "dispatched" as const,
                 dispatched_at: new Date().toISOString(),
                 assigned_unit: unit.name,
+                assigned_agency: unit.agency,
               }
             : r,
         ) ?? prev,
@@ -528,12 +608,13 @@ export default function FieldGatewayView() {
     // crew lights up as en route as soon as the sync lands.
     setToast(`✓ Work order ${candidate.id} dispatched to ${unit.name}.`);
 
-    // …then persist (ledger write re-syncs triage + /track, and the silent
-    // refresh fills the in-field table with the server timestamp).
+    // …then persist (assigned_agency rides along so every ledger consumer —
+    // department telemetry, /track, triage — agrees on the owning department).
     void (async () => {
       await patchTicket(candidate.id, {
         status: "dispatched",
         assigned_unit: unit.name,
+        assigned_agency: unit.agency,
       });
       void refreshReports();
     })();
@@ -566,7 +647,9 @@ export default function FieldGatewayView() {
     setReports(
       (prev) =>
         prev?.map((r) =>
-          r.id === report.id ? { ...r, assigned_unit: unit.name } : r,
+          r.id === report.id
+            ? { ...r, assigned_unit: unit.name, assigned_agency: unit.agency }
+            : r,
         ) ?? prev,
     );
     setToast(`✓ ${report.id} assigned to ${unit.name}.`);
@@ -574,6 +657,7 @@ export default function FieldGatewayView() {
       await patchTicket(report.id, {
         status: report.status,
         assigned_unit: unit.name,
+        assigned_agency: unit.agency,
       });
       void refreshReports();
     })();
@@ -640,10 +724,14 @@ export default function FieldGatewayView() {
                 Target: &lt;30m
               </span>
             }
-            value="18 min"
+            value={
+              kpi.avgArrivalMin != null
+                ? formatDurationMinutes(kpi.avgArrivalMin)
+                : "—"
+            }
             sub={
               <>
-                Average Arrival Time •{" "}
+                Avg Filed → Dispatched •{" "}
                 <span className="font-semibold text-emerald-800/80">
                   اوسط رسپانس وقت
                 </span>
@@ -655,13 +743,15 @@ export default function FieldGatewayView() {
             iconTone="bg-emerald-50 text-emerald-800"
             badge={
               <span className="inline-flex shrink-0 items-center rounded-full border border-emerald-200/60 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap text-emerald-800">
-                100% Geotagged
+                {kpi.geotaggedPct != null
+                  ? `${kpi.geotaggedPct}% Geotagged`
+                  : "Geotag —"}
               </span>
             }
-            value="14 Fixed Today"
+            value={`${kpi.fixedToday} Fixed Today`}
             sub={
               <>
-                Photo-Verified Works •{" "}
+                Resolved Today •{" "}
                 <span className="font-semibold text-emerald-800/80">
                   آج کے حل شدہ مسائل
                 </span>
@@ -729,12 +819,15 @@ export default function FieldGatewayView() {
           {/* Filter & triage strip */}
           <div className="mt-4 mb-2 flex flex-wrap items-center justify-between gap-4">
             <div className="flex flex-wrap items-center gap-2">
-              {AGENCY_FILTERS.map((filter) => {
+              {[
+                { key: "all", label: "All Urgent" },
+                ...departmentFilters,
+              ].map((filter) => {
                 const count =
                   filter.key === "all"
                     ? (candidates?.length ?? 0)
                     : (candidates?.filter((c) =>
-                        agencyMatches(filter.key, c.agency),
+                        sectorMatches(filter.key, c.agency),
                       ).length ?? 0);
                 const active = agencyFilter === filter.key;
                 return (
@@ -874,7 +967,9 @@ export default function FieldGatewayView() {
                             </span>
                           ) : (
                             <AssignSquadPopover
-                              units={activeUnits}
+                              units={activeUnits.filter((u) =>
+                                sectorMatches(u.sector, report.assigned_agency),
+                              )}
                               onAssign={(unit) =>
                                 assignSquadToReport(report, unit)
                               }
@@ -958,7 +1053,7 @@ export default function FieldGatewayView() {
         <FleetUnitModal
           sectors={sectors}
           onClose={() => setRegisterOpen(false)}
-          onSave={(unit) => {
+          onSave={(unit, accessCode) => {
             void (async () => {
               const updated = addSquadToRegistry(sectors, unit);
               if (!updated) {
@@ -969,9 +1064,16 @@ export default function FieldGatewayView() {
               }
               const ok = await pushRegistry(updated);
               if (ok) announceRegistryUpdate();
+              let codeNote = "";
+              if (ok && accessCode) {
+                const codeOk = await putSquadAccessCode(unit.id, accessCode);
+                codeNote = codeOk
+                  ? ` Access code issued — the crew can sign in on /squad.`
+                  : ` ⚠ Access code could not be saved.`;
+              }
               setToast(
                 ok
-                  ? `✓ ${unit.name} registered in the departments registry.`
+                  ? `✓ ${unit.name} registered in the departments registry.${codeNote}`
                   : `⚠ Registry unreachable — ${unit.name} kept for this session.`,
               );
             })();
@@ -984,7 +1086,7 @@ export default function FieldGatewayView() {
           unit={editUnit}
           sectors={sectors}
           onClose={() => setEditUnit(null)}
-          onSave={(next) => {
+          onSave={(next, accessCode) => {
             setOverlays((prev) => ({
               ...prev,
               [next.id]: { ...prev[next.id], ...next },
@@ -995,9 +1097,18 @@ export default function FieldGatewayView() {
                 const ok = await pushRegistry(updated);
                 if (ok) announceRegistryUpdate();
               }
+              if (accessCode) {
+                const codeOk = await putSquadAccessCode(next.id, accessCode);
+                setToast(
+                  codeOk
+                    ? `✓ ${next.name} details updated — access code rotated.`
+                    : `✓ ${next.name} details updated, but the access code could not be saved.`,
+                );
+                return;
+              }
+              setToast(`✓ ${next.name} details updated.`);
             })();
             setEditUnit(null);
-            setToast(`✓ ${next.name} details updated.`);
           }}
         />
       )}
@@ -1353,12 +1464,21 @@ function WorkOrderCard({
   now: number;
   onDispatch: (unitId: string) => void;
 }) {
-  const available = units.filter((u) => u.status !== "off_duty");
+  /* Dispatch rule — department first, then territory. The recommendation is
+     only drawn from crews of the ticket's own department whose serving wards
+     actually cover the reported area; the dropdown lists the department's
+     crews so the dispatcher keeps the final call. */
+  const departmentUnits = units.filter(
+    (u) => u.status !== "off_duty" && sectorMatches(u.sector, candidate.agency),
+  );
+  const servingUnits = departmentUnits.filter((u) =>
+    unitServesReport(u, candidate.areaName, candidate.cityName),
+  );
   // Rerank only when the ticket or the unit roster actually changes; the
   // signature keeps the memo dependency list primitive for the hooks lint.
   const unitSignature = units.map((u) => `${u.id}:${u.status}`).join("|");
   const recommended = useMemo(() => {
-    const scored = [...units.filter((u) => u.status !== "off_duty")].sort(
+    const scored = [...servingUnits].sort(
       (a, b) => scoreUnit(candidate, b) - scoreUnit(candidate, a),
     );
     return scored[0] ?? null;
@@ -1367,7 +1487,7 @@ function WorkOrderCard({
 
   const [manualPick, setManualPick] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const manualUnit = available.find((u) => u.id === manualPick) ?? null;
+  const manualUnit = departmentUnits.find((u) => u.id === manualPick) ?? null;
 
   const remaining = candidate.slaDeadlineMs - now;
   const overdue = remaining <= 0;
@@ -1458,8 +1578,10 @@ function WorkOrderCard({
         </p>
       )}
 
-      {/* Smart proximity recommendation */}
-      {recommended && (
+      {/* Smart proximity recommendation — only when a department crew actually
+          serves the reported area; otherwise point the dispatcher at the
+          dropdown instead of implying a crew owns territory it doesn't. */}
+      {recommended ? (
         <div className="my-3 flex flex-col items-start justify-between gap-3 rounded-xl border border-emerald-200/80 bg-emerald-50/70 p-3 sm:flex-row sm:items-center">
           <div className="flex min-w-0 items-start gap-2">
             <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700" />
@@ -1480,11 +1602,27 @@ function WorkOrderCard({
             1-Click Dispatch to Recommended Unit
           </button>
         </div>
+      ) : (
+        <div className="my-3 flex items-start gap-2 rounded-xl border border-amber-200/80 bg-amber-50/70 p-3">
+          <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
+          <div className="min-w-0">
+            <p className="text-xs font-bold text-slate-900">
+              {departmentUnits.length > 0
+                ? "This area's squad isn't available"
+                : "No squads registered for this department yet"}
+            </p>
+            <p className="text-[11px] leading-4 text-amber-800">
+              {departmentUnits.length > 0
+                ? "No crew serving this location is free right now — please select a crew from the dropdown."
+                : "Add a field squad for this department, or pick from the dropdown once one is registered."}
+            </p>
+          </div>
+        </div>
       )}
 
-      {/* Alternative assignment */}
+      {/* Alternative assignment — the department's own crews only */}
       <SquadCombobox
-        units={available}
+        units={departmentUnits}
         candidateId={candidate.id}
         selected={manualPick}
         onSelect={(unitId) =>
@@ -1512,6 +1650,14 @@ function formatOverdue(remainingMs: number): string {
   const hours = Math.floor(minutes / 60);
   if (hours >= 1) return `${hours}h`;
   return `${minutes}m`;
+}
+
+/** "18 min" / "2h 30m" — KPI dock dispatch-latency display. */
+function formatDurationMinutes(minutes: number): string {
+  if (minutes < 60) return `${minutes} min`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return m ? `${h}h ${m}m` : `${h}h`;
 }
 
 const URGENCY_PILL: Record<IncidentReport["urgency"], string> = {
@@ -1693,23 +1839,32 @@ function FleetUnitModal({
   unit?: FieldUnit;
   sectors: CoreSector[];
   onClose: () => void;
-  onSave: (unit: FieldUnit) => void;
+  onSave: (unit: FieldUnit, accessCode?: string) => void;
 }) {
   const editing = Boolean(unit);
-  const rosterAgencies = sectors
-    .flatMap((sector) => sector.agencies)
-    .filter((a) => agencyKeyFor(a.code) !== null);
+  /* Every department that fields at least one division can register crews —
+     grouped by sector in the dropdown below. */
+  const rosterOptions = sectors.flatMap((sector) =>
+    sector.agencies
+      .filter((a) => a.districtOperations.length > 0)
+      .map((a) => ({
+        agency: a,
+        sectorSlug: sector.slug,
+        sectorName: sector.name,
+      })),
+  );
   const [name, setName] = useState(unit?.name ?? "");
   const [agencyId, setAgencyId] = useState(
     unit?.agency
-      ? rosterAgencies.find((a) => agencyKeyFor(a.code) === unit.agency)?.id ??
-          rosterAgencies[0]?.id ??
+      ? rosterOptions.find((o) => o.agency.code === unit.agency)?.agency.id ??
+          rosterOptions[0]?.agency.id ??
           ""
-      : rosterAgencies[0]?.id ?? "",
+      : rosterOptions[0]?.agency.id ?? "",
   );
   const [divisionId, setDivisionId] = useState(
     unit?.divisionId ??
-      rosterAgencies.find((a) => a.id === agencyId)?.districtOperations[0]?.id ??
+      rosterOptions.find((o) => o.agency.id === agencyId)?.agency
+        .districtOperations[0]?.id ??
       ""
   );
   const [reg, setReg] = useState(unit?.reg === "—" ? "" : unit?.reg ?? "");
@@ -1718,38 +1873,77 @@ function FleetUnitModal({
   const [members, setMembers] = useState(String(unit?.capacity ?? 6));
   const [wards, setWards] = useState<string[]>(unit?.wards ?? []);
   const [status, setStatus] = useState<UnitStatus>("idle");
+  /* Officer sign-in credential for /squad — required when creating a crew,
+     optional on edit (blank keeps the issued code). The code itself lives in
+     the server-side access store, never in the registry document. */
+  const [accessCode, setAccessCode] = useState("");
+  const [hasIssuedCode, setHasIssuedCode] = useState(false);
 
   useModalDismiss(onClose);
 
+  useEffect(() => {
+    if (!editing || !unit) return;
+    let cancelled = false;
+    fetch(`/api/squad/access?ids=${encodeURIComponent(unit.id)}`, {
+      cache: "no-store",
+    })
+      .then((res) =>
+        res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`)),
+      )
+      .then((data: unknown) => {
+        if (cancelled) return;
+        setHasIssuedCode(
+          Boolean(
+            (data as { hasCode?: Record<string, boolean> }).hasCode?.[unit.id],
+          ),
+        );
+      })
+      .catch(() => {
+        // Unknown code state — the edit form still allows rotation.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [editing, unit]);
+
   const inputClass =
     "w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 placeholder:text-slate-400 focus:border-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-700/20";
-  const selectedAgency = rosterAgencies.find((a) => a.id === agencyId);
-  const divisions = selectedAgency?.districtOperations ?? [];
+  const selectedAgency = rosterOptions.find((o) => o.agency.id === agencyId);
+  const divisions = selectedAgency?.agency.districtOperations ?? [];
   const division = divisions.find((d) => d.id === divisionId) ?? divisions[0];
-  const valid = name.trim() && reg.trim() && crewLead.trim() && division;
+  const trimmedCode = accessCode.trim();
+  const codeValid =
+    trimmedCode === "" ? editing : ACCESS_CODE_PATTERN.test(trimmedCode);
+  const valid =
+    name.trim() && reg.trim() && crewLead.trim() && division && codeValid;
 
   const save = () => {
     if (!valid || !selectedAgency || !division) return;
     const membersCount = Math.max(1, Number(members) || 1);
-    onSave({
-      id: unit?.id ?? squadId(),
-      divisionId: division.id,
-      wards,
-      name: name.trim(),
-      vehicle: unit?.vehicle ?? "Unassigned vehicle",
-      vehicleShort: unit?.vehicleShort ?? "—",
-      reg: reg.trim().toUpperCase(),
-      agency: agencyKeyFor(selectedAgency.code) ?? "MCS",
-      crewLead: crewLead.trim(),
-      crewDetail: `${membersCount} personnel`,
-      phone: phone.trim(),
-      zoneAnchor: wards.length ? wards.join(", ") : `District-wide · ${division.district}`,
-      zoneShort: wards[0] ?? division.district,
-      status: unit?.status ?? status,
-      activeJob: unit?.activeJob ?? null,
-      completed: unit?.completed ?? 0,
-      capacity: membersCount,
-    });
+    onSave(
+      {
+        id: unit?.id ?? squadId(),
+        divisionId: division.id,
+        wards,
+        name: name.trim(),
+        vehicle: unit?.vehicle ?? "Unassigned vehicle",
+        vehicleShort: unit?.vehicleShort ?? "—",
+        reg: reg.trim().toUpperCase(),
+        agency: selectedAgency?.agency.code ?? "",
+        sector: selectedAgency?.sectorSlug ?? "",
+        district: division.district,
+        crewLead: crewLead.trim(),
+        crewDetail: `${membersCount} personnel`,
+        phone: phone.trim(),
+        zoneAnchor: wards.length ? wards.join(", ") : `District-wide · ${division.district}`,
+        zoneShort: wards[0] ?? division.district,
+        status: unit?.status ?? status,
+        activeJob: unit?.activeJob ?? null,
+        completed: unit?.completed ?? 0,
+        capacity: membersCount,
+      },
+      trimmedCode || undefined,
+    );
   };
 
   return (
@@ -1801,18 +1995,30 @@ function FleetUnitModal({
               value={agencyId}
               onChange={(e) => {
                 setAgencyId(e.target.value);
-                const next = rosterAgencies.find((a) => a.id === e.target.value);
-                setDivisionId(next?.districtOperations[0]?.id ?? "");
+                const next = rosterOptions.find(
+                  (o) => o.agency.id === e.target.value,
+                );
+                setDivisionId(next?.agency.districtOperations[0]?.id ?? "");
               }}
               aria-label="Department"
               disabled={editing}
               className={`${inputClass} cursor-pointer disabled:text-slate-400`}
             >
-              {rosterAgencies.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.code} — {a.fullName}
-                </option>
-              ))}
+              {sectors.map((sector) => {
+                const options = rosterOptions.filter(
+                  (o) => o.sectorSlug === sector.slug,
+                );
+                if (options.length === 0) return null;
+                return (
+                  <optgroup key={sector.id} label={sector.name}>
+                    {options.map((o) => (
+                      <option key={o.agency.id} value={o.agency.id}>
+                        {o.agency.code} — {o.agency.fullName}
+                      </option>
+                    ))}
+                  </optgroup>
+                );
+              })}
             </select>
           </Field>
           <Field label="District Division">
@@ -1876,6 +2082,32 @@ function FleetUnitModal({
               onChange={setWards}
             />
           </div>
+          <Field label="Squad Access Code — /squad officer sign-in" className="sm:col-span-2">
+            <input
+              value={accessCode}
+              onChange={(e) => setAccessCode(e.target.value)}
+              placeholder={
+                editing
+                  ? hasIssuedCode
+                    ? "Leave blank to keep the current code"
+                    : "No code issued yet — set one to let the crew sign in"
+                  : "e.g. KP7-2402 — the crew signs in with this"
+              }
+              autoComplete="off"
+              maxLength={12}
+              aria-label="Squad access code"
+              className={`${inputClass} font-mono tracking-wider`}
+            />
+            {!codeValid && (
+              <span className="mt-1 block text-[10px] font-semibold text-rose-600">
+                Use 4-12 letters, numbers or dashes — no spaces.
+              </span>
+            )}
+            <span className="mt-1 block text-[10px] font-medium text-slate-400">
+              Stored server-side only — officers enter it on the /squad login
+              portal; 5 wrong attempts lock sign-in for 60s.
+            </span>
+          </Field>
           {!editing && (
             <Field label="Initial Status" className="sm:col-span-2">
               <div className="flex gap-2">

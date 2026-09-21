@@ -11,6 +11,10 @@ export type SquadAvailability =
   | "on_break"
   | "off_duty";
 
+/** Shape of a squad access code (the /squad sign-in credential). Shared by
+    the field gate's validation copy and the server-side access store. */
+export const ACCESS_CODE_PATTERN = /^[A-Za-z0-9-]{4,12}$/;
+
 export const SQUAD_AVAILABILITY: Record<
   SquadAvailability,
   { label: string; dot: string; pill: string; registry: FieldSquad["status"] }

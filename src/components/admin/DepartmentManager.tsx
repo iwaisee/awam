@@ -88,38 +88,51 @@ function withLiveTelemetry(
   if (reports.length === 0) return sectors;
   const next: CoreSector[] = structuredClone(sectors);
   const agencies = next.flatMap((sector) => sector.agencies);
+  /* assigned_unit is the authoritative link once a crew is tasked — the
+     ledger's assigned_agency can lag behind a dispatch (intake routing
+     guesses the department before a dispatcher picks the squad). Index
+     every squad by name so tasked tickets pin their owning agency. */
+  const squadIndex = new Map<
+    string,
+    { agency: RegionalAgency; division: DistrictOperation; squad: FieldSquad }
+  >();
+  for (const agency of agencies) {
+    for (const division of agency.districtOperations) {
+      for (const squad of division.squads) {
+        squadIndex.set(squad.name.toLowerCase(), { agency, division, squad });
+      }
+    }
+  }
   for (const report of reports) {
-    const agency = agencies.find((a) =>
-      agencyMatchesLive(a.code, report.assigned_agency)
-    );
-    if (!agency) continue;
     const open = report.status !== "resolved";
+    const owner = report.assigned_unit
+      ? squadIndex.get(report.assigned_unit.toLowerCase())
+      : undefined;
+    const agency =
+      owner?.agency ??
+      (report.assigned_agency
+        ? agencies.find((a) =>
+            agencyMatchesLive(a.code, report.assigned_agency),
+          )
+        : undefined);
+    if (!agency) continue;
     if (open) agency.liveOpen = (agency.liveOpen ?? 0) + 1;
     else agency.liveResolved = (agency.liveResolved ?? 0) + 1;
-    let division: DistrictOperation | undefined;
-    if (report.assigned_unit) {
-      division = agency.districtOperations.find((op) =>
-        op.squads.some((s) => s.name === report.assigned_unit)
-      );
-    }
-    if (!division) {
-      division = agency.districtOperations.find(
+    const division =
+      owner?.division ??
+      agency.districtOperations.find(
         (op) =>
           op.coverage.includes(report.area_name) ||
           (op.coverage.length === 0 &&
             op.district.toLowerCase() === report.city_name.toLowerCase())
       );
-    }
     if (division) {
       if (open) division.openTickets += 1;
       else division.resolvedTickets += 1;
       /* Squad-level open workload — mirrors the division fold so the squad
          card's ticket badge tracks the ledger, not the stale registry seed. */
-      if (open && report.assigned_unit) {
-        const squad = division.squads.find(
-          (s) => s.name === report.assigned_unit
-        );
-        if (squad) squad.activeTickets = (squad.activeTickets ?? 0) + 1;
+      if (open && owner) {
+        owner.squad.activeTickets = (owner.squad.activeTickets ?? 0) + 1;
       }
     }
   }
@@ -2922,8 +2935,16 @@ export default function DepartmentManager() {
 
   useEffect(() => {
     /* Skip echoes: after a sync, `sectors` holds the exact object we just
-       pulled; only genuine mutations produce a new identity worth pushing. */
-    if (!registryHydrated.current || registrySynced.current === savedSectors) return;
+       pulled; only genuine mutations produce a new identity worth pushing.
+       Also never push before one successful sync — if hydration failed, the
+       local state is still seed-derived and pushing it would wipe the
+       shared store (squads included). */
+    if (
+      !registryHydrated.current ||
+      registrySynced.current === null ||
+      registrySynced.current === savedSectors
+    )
+      return;
     void pushRegistry(savedSectors).then((ok) => {
       if (ok) {
         registrySynced.current = savedSectors;

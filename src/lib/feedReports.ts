@@ -20,7 +20,7 @@ export function agencyCode(assigned: string): string {
   return assigned.split(/[\s,]/)[0] || assigned;
 }
 
-/** Category → field photo texture (same assets the community feed uses). */
+/** Category → fallback texture when a ticket carries no citizen photo. */
 const CATEGORY_IMAGE: Record<string, string> = {
   electricity: "/feed/electricity.svg",
   sanitation: "/feed/sanitation.svg",
@@ -87,7 +87,9 @@ export function toFeedReport(report: IncidentReport, now: number): FeedReport {
     reportedBy: report.citizen_name || "Anonymous",
     gpsVerified: true,
     thumbnailTint: CATEGORY_TINT[report.category_id] ?? "from-slate-500 to-slate-800",
-    imageUrl: CATEGORY_IMAGE[report.category_id] ?? "/feed/street.svg",
+    // The citizen's own evidence photo first (Cloudinary CDN URL or inline
+    // data URL); the category texture is only a placeholder fallback.
+    imageUrl: report.photo_url || CATEGORY_IMAGE[report.category_id] || "/feed/street.svg",
     assignedAuthority: report.assigned_agency,
     assignedSquad: report.assigned_unit ?? undefined,
     slaLabel,

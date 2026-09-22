@@ -45,7 +45,6 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import {
-  DEPARTMENT_SECTORS,
   MANAGER_DESIGNATIONS,
   PROVINCE_OPTIONS,
   SECTOR_WORKFORCE,
@@ -60,7 +59,6 @@ import {
   announceRegistryUpdate,
   fetchRegistry,
   pushRegistry,
-  readLocalRegistry,
 } from "@/lib/registryClient";
 import { useLiveReports } from "@/lib/liveReports";
 import type { IncidentReport } from "@/types/civic";
@@ -214,10 +212,9 @@ const uid = (prefix: string) =>
   `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 
 /* Registry persistence — the departments console mutates its state (agencies,
-   desks, squads) and every change is pushed to the server-side registry
-   (data/departments.db via /api/departments) so all browsers share one copy.
-   A browser's pre-server localStorage registry migrates up once, on first
-   load against an empty store. */
+   desks, squads) and every change is pushed to the shared Neon registry
+   (via /api/departments) so all browsers read one copy. There is no local
+   seed or cache — an empty store renders empty until an admin adds data. */
 
 const apiSlugOf = (code: string) =>
   code.toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9]+/g, "-");
@@ -2885,7 +2882,7 @@ type ToastState = { tone: "success" | "error"; message: string } | null;
 export default function DepartmentManager() {
   /* The persisted registry — mutations land here and are pushed to the
      server store. `savedSectors` never carries rendered telemetry. */
-  const [savedSectors, setSavedSectors] = useState<CoreSector[]>(DEPARTMENT_SECTORS);
+  const [savedSectors, setSavedSectors] = useState<CoreSector[]>([]);
   const { raw: liveReportRows } = useLiveReports();
   /* Hydration guard — the persist effect must not overwrite stored edits
      with the fresh seed before the stored copy has been read. */
@@ -2905,25 +2902,12 @@ export default function DepartmentManager() {
     void (async () => {
       await Promise.resolve();
       try {
-        const { sectors: remote, seeded } = await fetchRegistry();
+        const { sectors: remote } = await fetchRegistry();
         if (cancelled) return;
-        let value = remote;
-        if (!seeded) {
-          /* Server store still on the built-in seed — migrate this browser's
-             localStorage registry one-time so pre-existing divisions/squads
-             survive the move to the shared store. The push happens BEFORE
-             arming state so the persist effect can't echo the seed back and
-             block this migration. */
-          const local = readLocalRegistry();
-          if (local) {
-            value = local;
-            void pushRegistry(local);
-          }
-        }
-        registrySynced.current = value;
-        if (!cancelled) setSavedSectors(value);
+        registrySynced.current = remote;
+        if (!cancelled) setSavedSectors(remote);
       } catch {
-        /* server unreachable — keep the current (seed) state */
+        /* server unreachable — keep the current (empty) state */
       }
       registryHydrated.current = true;
     })();
@@ -2957,15 +2941,9 @@ export default function DepartmentManager() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
-  const [openSectors, setOpenSectors] = useState<Set<string>>(() => {
-    // Deep-linked landings (?agency=wasa-skt) must find their sector already
-    // open — the accordion starts expanded around the URL selection.
-    const initial = searchParams.get("agency");
-    const parent = initial
-      ? DEPARTMENT_SECTORS.find((s) => s.agencies.some((a) => a.id === initial))
-      : undefined;
-    return new Set([parent?.id ?? "power"]);
-  });
+  const [openSectors, setOpenSectors] = useState<Set<string>>(
+    () => new Set(["power"])
+  );
   const [search, setSearch] = useState("");
   /* Sidebar navigator mode: the sector roster accordion or the province
      coverage tree (which departments operate where). */

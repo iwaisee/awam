@@ -152,7 +152,7 @@ type ColumnId = (typeof COLUMN_OPTIONS)[number]["id"];
 export default function UsersView() {
   const router = useRouter();
   // The citizen ledger IS the reports backend — profiles are derived from the
-  // SQLite ledger via /api/citizens; no demo baseline is merged in.
+  // Neon ledger via /api/citizens; no demo baseline is merged in.
   const [citizens, setCitizens] = useState<CitizenProfile[]>([]);
   const [sync, setSync] = useState<"loading" | "ready" | "error">("loading");
   const [refreshKey, setRefreshKey] = useState(0);
@@ -277,7 +277,7 @@ export default function UsersView() {
   };
 
   // Governance actions persist through the citizens API; success bumps the
-  // refresh key so the ledger (and the open drawer) re-derives from SQLite.
+  // refresh key so the ledger (and the open drawer) re-derives from Neon.
   const actuate = async (key: string, body: Record<string, unknown>) => {
     const res = await fetch("/api/citizens", {
       method: "PATCH",
@@ -662,7 +662,6 @@ export default function UsersView() {
                       <td className="px-4 py-3.5">
                         <p className="text-xs font-bold text-slate-800">{c.district}</p>
                         <p className="text-[11px] font-medium text-slate-500">{c.area}</p>
-                        <p className="font-mono text-[10px] font-semibold text-slate-400">{c.uc}</p>
                       </td>
                     )}
                     {showCol("contact") && (
@@ -1084,10 +1083,7 @@ function ProfileDrawer({
               <div className="flex items-start justify-between gap-4 py-2.5 first:pt-0">
                 <dt className="shrink-0 font-medium text-slate-400">Home District</dt>
                 <dd className="text-right font-semibold text-slate-800">
-                  {citizen.district} — {citizen.area}{" "}
-                  <span className="block font-mono text-[10px] font-medium text-slate-400">
-                    {citizen.uc}
-                  </span>
+                  {citizen.district} — {citizen.area}
                 </dd>
               </div>
               <div className="flex items-start justify-between gap-4 py-2.5">

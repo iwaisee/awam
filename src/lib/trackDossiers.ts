@@ -318,7 +318,7 @@ export function dossierFromReport(r: IncidentReport): TrackDossier {
     urgencyLabel: urgency.label,
     urgencyTone: urgency.tone,
     reportedLabel: reported,
-    location: r.uc_number ? `${location} (${r.uc_number})` : location,
+    location,
     jurisdiction: r.jurisdiction,
     coordinatesLabel: r.coordinates
       ? `${r.coordinates.lat.toFixed(4)}° N, ${r.coordinates.lng.toFixed(4)}° E`

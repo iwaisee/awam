@@ -263,6 +263,7 @@ export default function TerritoriesView({
   const {
     cities,
     provinces,
+    hydrated: coverageLoaded,
     addProvince,
     updateProvince,
     deleteProvince,
@@ -1573,6 +1574,19 @@ export default function TerritoriesView({
       anonymousReports,
     };
   }, [provinceRoots, allProvinces, liveReports]);
+
+  // The territory tree is the Neon coverage document — hold a skeleton until
+  // it lands instead of flashing an empty hierarchy.
+  if (!coverageLoaded) {
+    return (
+      <div className="flex w-full min-w-0 flex-1 flex-col overflow-y-auto bg-slate-50/50 lg:flex-row lg:overflow-hidden">
+        <div className="h-full min-h-[400px] w-full animate-pulse bg-white lg:w-[360px] lg:border-r" />
+        <div className="flex-1 p-6">
+          <div className="h-72 animate-pulse rounded-2xl border border-slate-200 bg-white" />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex w-full min-w-0 flex-1 flex-col overflow-y-auto bg-slate-50/50 lg:flex-row lg:overflow-hidden">

@@ -3,7 +3,7 @@
 /* Resolution Proof Modal — closes the accountability loop between the field
    squad, the admin Command Radar and the citizen's tracker. The "after"
    photo is downscaled client-side (canvas) and written into the report
-   ledger together with work notes + materials via PATCH /api/reports;
+   ledger together with work notes via PATCH /api/reports;
    resolution telemetry is stamped server-side by the ledger. */
 
 import { useEffect, useRef, useState } from "react";
@@ -44,7 +44,6 @@ export default function ResolveTaskModal({
   const [afterPhoto, setAfterPhoto] = useState<string | null>(null);
   const [photoName, setPhotoName] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
-  const [materials, setMaterials] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -102,7 +101,6 @@ export default function ResolveTaskModal({
           status: "resolved",
           after_photo_url: afterPhoto,
           resolution_notes: notes.trim(),
-          materials_used: materials.trim(),
         }),
       });
       if (!response.ok) {
@@ -278,24 +276,6 @@ export default function ResolveTaskModal({
             </button>
           ))}
         </div>
-
-        {/* Materials / inventory logged */}
-        <label className="mt-4 block">
-          <span className="text-[10px] font-bold tracking-wider text-slate-400 uppercase">
-            Materials / inventory logged{" "}
-            <span className="font-medium text-slate-400 normal-case">
-              (optional)
-            </span>
-          </span>
-          <input
-            type="text"
-            value={materials}
-            onChange={(e) => setMaterials(e.target.value)}
-            maxLength={500}
-            placeholder="e.g. 1x 200kVA fuse, 12m cable"
-            className="mt-1.5 w-full rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-xs text-slate-800 placeholder:text-slate-400 focus:border-emerald-700 focus:ring-2 focus:ring-emerald-700/20 focus:outline-none"
-          />
-        </label>
 
         {/* Lead sign-off — authenticated session officer */}
         <p className="mt-4 flex items-center gap-1.5 rounded-xl bg-slate-50 px-3.5 py-2.5 text-[11px] font-semibold text-slate-600 ring-1 ring-slate-100">

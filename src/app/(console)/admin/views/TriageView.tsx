@@ -117,7 +117,7 @@ const PAGE_SIZES = [10, 20, 50, 100];
 
 export default function TriageView() {
   const router = useRouter();
-  // The queue IS the live SQLite ledger — no demo baseline is merged in.
+  // The queue IS the live Neon ledger — no demo baseline is merged in.
   const [refreshKey, setRefreshKey] = useState(0);
   const { live, raw, settledAt } = useLiveReports(refreshKey);
   const [search, setSearch] = useState("");

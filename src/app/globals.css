@@ -46,6 +46,15 @@ body {
   }
 }
 
+/* Recharts' internal <g> layers carry tabindex="-1", so clicking a bar, axis
+   date or number focuses the nearest one and Chrome paints its default blue
+   focus ring on the chart. These charts are aria-hidden decorations inside
+   real <button> cards, so suppress the ring inside recharts wrappers. */
+.recharts-wrapper:focus,
+.recharts-wrapper :focus {
+  outline: none;
+}
+
 .urdu {
   font-family: "Noto Sans Arabic", var(--font-hanken), sans-serif;
   line-height: 2;

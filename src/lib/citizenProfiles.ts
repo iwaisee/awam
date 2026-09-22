@@ -4,7 +4,7 @@ import type { IncidentReport } from "@/types/civic";
    is the named/phone-identified submitter behind one or more rows of the real
    reports ledger. Profiles are aggregated server-side from `/api/reports`
    rows plus the admin governance state (citizen_admin table). Client-safe:
-   no node:sqlite imports here. */
+   no Postgres imports here. */
 
 export type CitizenStanding = "active" | "suspended";
 export type IncidentTone = "emerald" | "amber" | "rose" | "sky";
@@ -32,7 +32,6 @@ export interface CitizenProfile {
   tint: string;
   district: string;
   area: string;
-  uc: string;
   phone: string;
   badgeOverride: boolean;
   scoreModifier: number;
@@ -152,7 +151,6 @@ export function deriveCitizenProfiles(
     const latest = rows[0];
     const phone = rows.find((r) => r.citizen_phone.trim() !== "")?.citizen_phone ?? "";
     const area = rows.find((r) => r.area_name.trim() !== "")?.area_name ?? "—";
-    const uc = rows.find((r) => (r.uc_number ?? "").trim() !== "")?.uc_number ?? "—";
     const name = rows.find((r) => r.citizen_name.trim() !== "")?.citizen_name ?? "Anonymous";
 
     const reported = rows.length;
@@ -184,7 +182,6 @@ export function deriveCitizenProfiles(
       tint: AVATAR_TINTS[fnv1a(key) % AVATAR_TINTS.length],
       district,
       area,
-      uc,
       phone,
       badgeOverride: admin.badgeOverride,
       scoreModifier: admin.scoreModifier,

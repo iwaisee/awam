@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { MapPin, Layers, Camera, ClipboardCheck, ChevronLeft, ChevronRight } from "lucide-react";
 import StepLocation from "@/components/StepLocation";
@@ -70,12 +70,26 @@ export default function WizardShell({
 }) {
   const [step, setStep] = useState(0);
   const router = useRouter();
-  const { getReportableAreas, cities, categories } = useCoverage();
+  const { getReportableAreas, cities, categories, hydrated: coverageLoaded } = useCoverage();
   const [formData, setFormData] = useState<ReportFormData>(() => ({
     ...emptyReport,
     category: initialCategory,
     city: resolveCityParam(cities, initialCity),
   }));
+
+  /* Re-resolve the deep-linked district once the Neon roster arrives — the
+     initial state ran against an empty (pre-fetch) coverage tree. */
+  useEffect(() => {
+    if (!coverageLoaded) return;
+    setFormData((prev) =>
+      prev.city
+        ? prev
+        : { ...prev, city: resolveCityParam(cities, initialCity) }
+    );
+    // Runs when the roster first arrives; later roster edits must not
+    // rewrite the citizen's in-progress selection.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [coverageLoaded]);
   const [referenceId, setReferenceId] = useState("");
   const [submittedReport, setSubmittedReport] = useState<IncidentReport | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -118,8 +132,12 @@ export default function WizardShell({
       if (!formData.category || !visible.some((c) => c.id === formData.category))
         return false;
     }
-    if (completedStep >= 2 && (!formData.title.trim() || !formData.description.trim()))
-      return false;
+    if (completedStep >= 2) {
+      if (!formData.title.trim() || !formData.description.trim()) return false;
+      // Proof-of-Presence gate: a verified live capture (GPS fix + stamped
+      // photo) is mandatory evidence before review.
+      if (!formData.geo || formData.files.length === 0) return false;
+    }
     return true;
   };
 
@@ -140,8 +158,8 @@ export default function WizardShell({
     setSubmitting(true);
     setSubmitError(null);
     try {
-      // First attached photo rides along as a downscaled data URL so the
-      // dossier can show the citizen's own picture of the issue.
+      // The verified live capture rides along as a downscaled data URL —
+      // the GPS/timestamp badge is part of the pixels, so it survives.
       const photoFile = formData.files[0];
       const photo_url = photoFile
         ? await readDownscaledDataUrl(photoFile, { maxSize: 900, square: false })
@@ -195,7 +213,11 @@ export default function WizardShell({
         ? formData.category !== null &&
           canProceedUpTo(1)
         : step === 2
-          ? formData.title.trim() !== "" && formData.description.trim() !== ""
+          ? formData.title.trim() !== "" &&
+            formData.description.trim() !== "" &&
+            // Verified live capture required (see canProceedUpTo).
+            formData.geo !== null &&
+            formData.files.length > 0
           : true);
 
   return (
@@ -209,6 +231,14 @@ export default function WizardShell({
         </header>
 
         <div className="rounded-card-lg border border-line bg-card p-6 shadow-[0_4px_12px_rgba(0,0,0,0.05)] sm:p-8">
+          {!coverageLoaded ? (
+            <div className="space-y-4">
+              <div className="h-10 animate-pulse rounded-xl bg-canvas" />
+              <div className="h-24 animate-pulse rounded-xl bg-canvas" />
+              <div className="h-12 animate-pulse rounded-xl bg-canvas" />
+            </div>
+          ) : (
+          <>
           {step < TOTAL_STEPS && (
             <nav aria-label="Report progress" className="mb-8">
               <ol className="flex items-start">
@@ -307,6 +337,8 @@ export default function WizardShell({
                 </button>
               )}
             </div>
+          )}
+          </>
           )}
         </div>
 

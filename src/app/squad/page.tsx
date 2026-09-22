@@ -3,7 +3,7 @@ import SquadPortal from "@/components/squad/SquadPortal";
 
 /* /squad — Field Squad Operations Portal. A mobile-first field console bound
    to one real squad from the departments registry; all tickets, KPIs and
-   resolution proof flows read and write the live SQLite report ledger. */
+   resolution proof flows read and write the live Neon report ledger. */
 
 export const metadata: Metadata = {
   title: "Field Squad Operations • Sada-e-Awam",

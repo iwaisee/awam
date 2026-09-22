@@ -1,5 +1,5 @@
 import WizardShell from "@/components/WizardShell";
-import { DEPARTMENTS } from "@/data/mockData";
+import { DEPARTMENTS } from "@/data/departmentDirectory";
 import { CATEGORY_META } from "@/types/report";
 
 export const metadata = {

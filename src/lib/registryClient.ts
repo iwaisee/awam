@@ -1,16 +1,10 @@
 "use client";
 
-/* Client transport + localStorage migration for the departments registry.
-   The registry itself lives server-side (data/departments.db via
-   /api/departments) so every browser shares one copy. localStorage is only
-   read once during migration — pre-existing divisions/squads a browser saved
-   before the server store existed are pushed up on first load. */
+/* Client transport for the departments registry. The registry lives
+   server-side (Neon, via /api/departments) so every browser shares one copy;
+   this module is read/write transport only — no local cache, no seed. */
 
 import type { CoreSector } from "@/data/departmentRegistry";
-
-const SECTORS_STORAGE_KEY = "sada_departments_registry";
-const SECTORS_SCHEMA_KEY = "sada_departments_schema";
-const SECTORS_SCHEMA_VERSION = "v3";
 
 /** Fired on the window after a successful save — same-tab listeners
     (overview, field gateway) re-sync immediately. */
@@ -28,32 +22,8 @@ function isValidRegistry(value: unknown): value is CoreSector[] {
   );
 }
 
-/** Validated localStorage registry from before the server store existed —
-    the migration source. Returns null when absent or unreadable. */
-export function readLocalRegistry(): CoreSector[] | null {
-  try {
-    if (window.localStorage.getItem(SECTORS_SCHEMA_KEY) !== SECTORS_SCHEMA_VERSION)
-      return null;
-    const raw = window.localStorage.getItem(SECTORS_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed: unknown = JSON.parse(raw);
-    return isValidRegistry(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-export function clearLocalRegistry(): void {
-  try {
-    window.localStorage.removeItem(SECTORS_STORAGE_KEY);
-    window.localStorage.removeItem(SECTORS_SCHEMA_KEY);
-  } catch {
-    /* storage unavailable — nothing to clear */
-  }
-}
-
-/** Server copy — `seeded: false` means the store has never been saved and is
-    serving the built-in seed (a localStorage migration may still run). */
+/** Server copy — `seeded: false` means the store has never been saved and
+    holds an empty roster. */
 export async function fetchRegistry(): Promise<{
   sectors: CoreSector[];
   seeded: boolean;

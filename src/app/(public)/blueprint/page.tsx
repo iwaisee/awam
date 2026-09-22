@@ -310,38 +310,38 @@ Content-Type: application/json
 const AUDIT_ROWS: Array<[string, string, string]> = [
   [
     "Incident ledger",
-    "SQLite ledger at data/reports.db — read/appended/updated by GET/POST/PATCH in src/app/api/reports/route.ts",
+    "Neon Postgres ledger — read/appended/updated by GET/POST/PATCH in src/app/api/reports/route.ts",
     "500-row cap, newest-first; every write rewrites the entire file",
   ],
   [
     "Citizen profile & identity",
-    "Browser localStorage key sada_citizen_profile (React UserContext)",
+    "Neon app_state citizen-profile document (React UserContext)",
     "Per-device only; dies with browser data; migrates legacy sada_citizen_settings",
   ],
   [
     "Admin identity",
-    "localStorage sada_admin_profile (useSyncExternalStore)",
+    "Neon app_state admin-profile document (useSyncExternalStore)",
     "Anyone can edit devtools → instant fake 'DG' identity",
   ],
   [
     "System preferences",
-    "localStorage sada_system_prefs (admin Settings view)",
+    "Neon app_state system-prefs document (admin Settings view)",
     "Per-browser; not shared across the department",
   ],
   [
     "Territories & SLA taxonomy",
-    "localStorage sada_coverage_data / sada_category_rules, edited in console views",
+    "Neon coverage document behind /api/territories, edited in console views",
     "Each admin edits a private copy — admins drift apart",
   ],
   [
     "Offline filing cache",
-    "localStorage sada_my_reports (max 12)",
+    "Neon report ledger (/api/reports) — the only store",
     "Read only as /track fallback; not read by /my-reports",
   ],
   [
     "Feed / portal / radar datasets",
-    "Static TS modules src/data/mockData.ts & operationsData.ts",
-    "Hardcoded; resets on every deploy; upvotes live in component memory",
+    "Neon ledger behind /api/reports — mapped per surface",
+    "Every card is a live submission; actions persist across devices",
   ],
   [
     "Photos",
@@ -358,7 +358,7 @@ const AUDIT_ROWS: Array<[string, string, string]> = [
 const RACES_ROWS: Array<[string, string]> = [
   [
     "1,000 simultaneous submissions",
-    "Each POST inserts a row into SQLite (WAL mode) — concurrent writers serialize safely, no whole-file rewrites, and mid-write crashes cannot truncate existing rows.",
+    "Each POST inserts a row into Neon Postgres — concurrent writers serialize safely and the ledger is shared across every deployment.",
   ],
   [
     "Data loss & cache eviction",
@@ -454,8 +454,8 @@ const PHASES = [
     tone: "bg-emerald-100 text-emerald-900 ring-emerald-200",
     items: [
       "Stabilize client flows; eradicate mobile clipping; keep the floating dirty-state save docks (already shipped) as the interaction standard.",
-      "Report storage now runs on SQLite; the remaining mock registries (mockData.ts, operationsData.ts) sit behind typed interfaces so the swap to a real backend stays a data-source change, not a UI rewrite.",
-      "Ship the revamped Citizen Dashboard (/my-reports reading sada_my_reports — closing the demo-only gap) and the Field Dispatch console.",
+      "Report storage now runs on Neon; all mock/seed registries are deleted — every surface (feed, portal, radar, registries) reads the shared ledger behind typed interfaces.",
+      "Ship the revamped Citizen Dashboard (/my-reports reading the live ledger) and the Field Dispatch console.",
       "Client-side JSON/CSV territory import-export in the Territories editor; feed page starts consuming ?q= / ?status= deep links.",
     ],
     exit: "Demo runs end-to-end from a single source of typed truth; zero dead UI paths in the sitemap audit's Loose Ends list.",
@@ -721,7 +721,7 @@ export default function BlueprintPage() {
               URL-obscure (<Mono>/admin/…</Mono> is public; my own sitemap
               page enumerates every view). Identity — including the
               &ldquo;DG&rdquo; badge — is whatever string sits in{" "}
-              <Mono>sada_admin_profile</Mono>. Every mutating API call is
+              <Mono>admin-profile</Mono> in Neon. Every mutating API call is
               anonymous. This is fine for a clickable demo; it is the single
               biggest gap between the demo and anything a government agency
               can touch.

@@ -16,9 +16,20 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Database (Neon Postgres)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+All server-side data lives in a [Neon](https://neon.tech) Postgres project (`Awam`, branch `production`) as **normalized tables**: `reports` + `citizen_admin` (the ledger), `provinces` / `cities` / `zones` / `areas` / `category_rules` (territories), `sectors` / `agencies` / `divisions` / `squads` (departments registry), and `app_state` (legacy key-value docs; squad access codes + field session live here). Connection details are pulled into `.env.local` by the Neon CLI — `DATABASE_URL` (pooled, used by the app) and `DATABASE_URL_UNPOOLED` (used for migrations).
+
+Common tasks:
+
+```bash
+npx neon link            # connect this repo to the Neon project (writes .neon)
+npx neon env pull        # refresh .env.local with the current branch's vars
+npm run migrate:neon     # import legacy local SQLite stores (data/*.db) into Neon — idempotent
+npm run migrate:tables   # unpack legacy JSON docs (coverage/registry) into the normalized tables — idempotent, needs dev server running
+```
+
+The schema is defined in `db/schema.sql` and auto-created at runtime (`src/lib/pg.ts`). Data access lives in `src/lib/*Db.ts` on top of the `pg` pool: the reports ledger and app state are row-level, while the territory and department trees keep their whole-document client contracts (`/api/territories` GET/PUT, `PUT /api/departments`) and sync them into the normalized tables transactionally.
 
 ## Learn More
 

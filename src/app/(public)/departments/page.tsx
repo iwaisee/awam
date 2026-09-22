@@ -17,8 +17,8 @@ import {
   Landmark,
   CheckCircle2,
 } from "lucide-react";
-import { DEPARTMENTS, resolveJurisdiction } from "@/data/mockData";
-import type { Department } from "@/data/mockData";
+import { DEPARTMENTS, resolveJurisdiction } from "@/data/departmentDirectory";
+import type { Department } from "@/data/departmentDirectory";
 
 const DEPT_ICONS: Record<
   Department["icon"],

@@ -4,7 +4,12 @@ import { readState, writeState } from "@/lib/appStateDb";
 /* Shared application state transport. Keys are whitelisted — anything a
    browser can push must be a documented shared document. */
 
-const ALLOWED_KEYS = new Set(["coverage", "system-prefs", "admin-profile"]);
+const ALLOWED_KEYS = new Set([
+  "coverage",
+  "system-prefs",
+  "admin-profile",
+  "citizen-profile",
+]);
 
 export async function GET(
   _request: Request,
@@ -17,7 +22,7 @@ export async function GET(
       { status: 404 },
     );
   }
-  const value = readState(key);
+  const value = await readState(key);
   return NextResponse.json({ value, seeded: value !== null });
 }
 
@@ -47,7 +52,7 @@ export async function PUT(
         { status: 413 },
       );
     }
-    writeState(key, body.value);
+    await writeState(key, body.value);
     return NextResponse.json({ success: true });
   } catch (error) {
     return NextResponse.json(

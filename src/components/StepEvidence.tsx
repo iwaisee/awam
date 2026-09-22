@@ -1,7 +1,7 @@
 "use client";
 
-import { useRef } from "react";
-import { Camera, FileText, X } from "lucide-react";
+import { X } from "lucide-react";
+import LiveReportCapture from "@/components/report/LiveReportCapture";
 import {
   AVAILABLE_TAGS,
   SEVERITY_META,
@@ -14,18 +14,11 @@ interface StepEvidenceProps {
 }
 
 export default function StepEvidence({ formData, updateForm }: StepEvidenceProps) {
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
   const toggleTag = (tag: string) => {
     const tags = formData.tags.includes(tag)
       ? formData.tags.filter((t) => t !== tag)
       : [...formData.tags, tag];
     updateForm({ tags });
-  };
-
-  const handleFiles = (fileList: FileList | null) => {
-    if (!fileList) return;
-    updateForm({ files: [...formData.files, ...Array.from(fileList)] });
   };
 
   const inputClass =
@@ -170,55 +163,15 @@ export default function StepEvidence({ formData, updateForm }: StepEvidenceProps
       </div>
 
       <div>
-        <p className="mb-2 text-sm font-bold text-ink">
-          Photos <span className="urdu text-ink-soft font-normal">تصاویر</span>
-        </p>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          multiple
-          className="hidden"
-          onChange={(e) => {
-            handleFiles(e.target.files);
-            e.target.value = "";
-          }}
+        <LiveReportCapture
+          storedFile={formData.files[0] ?? null}
+          storedGeo={formData.geo}
+          storedCapturedAt={formData.capturedAt}
+          onConfirm={({ file, geo, capturedAt }) =>
+            updateForm({ files: [file], geo, capturedAt })
+          }
+          onRemove={() => updateForm({ files: [], geo: null, capturedAt: null })}
         />
-        <button
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
-          className="flex w-full items-center justify-center gap-2 rounded-btn border-2 border-dashed border-line bg-canvas px-4 py-6 text-sm font-semibold text-ink-soft hover:border-primary/50 hover:text-primary"
-        >
-          <Camera className="h-5 w-5" />
-          Attach photos of the issue
-        </button>
-        {formData.files.length > 0 && (
-          <ul className="mt-2 space-y-2">
-            {formData.files.map((file, index) => (
-              <li
-                key={`${file.name}-${index}`}
-                className="flex items-center justify-between rounded-btn border border-line bg-card px-3 py-2 text-sm"
-              >
-                <span className="flex items-center gap-2 truncate text-ink">
-                  <FileText className="h-4 w-4 shrink-0 text-primary" />
-                  <span className="truncate">{file.name}</span>
-                </span>
-                <button
-                  type="button"
-                  aria-label={`Remove ${file.name}`}
-                  onClick={() =>
-                    updateForm({
-                      files: formData.files.filter((_, i) => i !== index),
-                    })
-                  }
-                  className="rounded-full p-1 text-ink-muted hover:bg-danger-tint hover:text-danger"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
       </div>
     </div>
   );

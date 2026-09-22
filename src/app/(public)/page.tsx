@@ -26,11 +26,10 @@ import {
 } from "lucide-react";
 import {
   DEFAULT_PILOT_CITY_ID,
-  PILOT_CITIES,
-  findPilotCity,
   pilotBadgeLabel,
   pilotDisplayLabel,
 } from "@/data/pilotCities";
+import { useCoverage } from "@/context/CoverageContext";
 import { appendWaitlistEntry } from "@/lib/cityWaitlist";
 import RiverCleanupCompare from "@/components/RiverCleanupCompare";
 import type { CityItem, IncidentReport } from "@/types/civic";
@@ -122,7 +121,7 @@ interface LiveCard {
 }
 
 /** Newest live tickets for the accountability stream — derived from the
-    SQLite ledger so citizen submissions surface on the landing page. */
+    Neon ledger so citizen submissions surface on the landing page. */
 function useLiveCards(): LiveCard[] {
   const [cards, setCards] = useState<LiveCard[]>([]);
   useEffect(() => {
@@ -215,10 +214,13 @@ export default function LandingPage() {
   const [waitlistError, setWaitlistError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const liveCards = useLiveCards();
+  /* The district roster is the Neon coverage document — no static seed. */
+  const { cities: pilotCities, hydrated: rosterLoaded } = useCoverage();
 
   const selectedCity =
-    findPilotCity(selectedCityId) ?? PILOT_CITIES[0];
-  const sialkotPilot = findPilotCity(DEFAULT_PILOT_CITY_ID) ?? PILOT_CITIES[0];
+    pilotCities.find((c) => c.id === selectedCityId) ??
+    pilotCities.find((c) => c.id === DEFAULT_PILOT_CITY_ID);
+  const sialkotPilot = pilotCities.find((c) => c.id === DEFAULT_PILOT_CITY_ID);
 
   const cityMenuRef = useRef<HTMLDivElement>(null);
   const phoneInputRef = useRef<HTMLInputElement>(null);
@@ -228,9 +230,10 @@ export default function LandingPage() {
      only. Development (localhost) skips the external service entirely because
      ipapi.co rate-limits repeated local reloads, so the Sialkot pilot default
      stands immediately. City state is applied after a microtask so the
-     hydration render is never diverged from the server markup. */
+     hydration render is never diverged from the server markup. Runs after the
+     Neon roster has loaded so cache matches resolve against real districts. */
   useEffect(() => {
-    if (detectionStarted.current) return;
+    if (!rosterLoaded || detectionStarted.current) return;
     detectionStarted.current = true;
 
     void (async () => {
@@ -239,7 +242,7 @@ export default function LandingPage() {
       await Promise.resolve();
       const cached = readCityCache();
       if (cached) {
-        const match = PILOT_CITIES.find(
+        const match = pilotCities.find(
           (c) =>
             c.id === cached || c.name_en.toLowerCase() === cached.toLowerCase()
         );
@@ -263,7 +266,7 @@ export default function LandingPage() {
         const data = (await res.json()) as { city?: string };
         const detected = data.city?.trim().toLowerCase();
         if (!detected) return;
-        const match = PILOT_CITIES.find(
+        const match = pilotCities.find(
           (c) => c.name_en.toLowerCase() === detected
         );
         if (match) {
@@ -274,7 +277,10 @@ export default function LandingPage() {
         // Ad-blockers, timeouts and offline mode all fail silently.
       }
     })();
-  }, []);
+    // The lookup reads the roster exactly once, when it first arrives; later
+    // roster edits must not re-run geodetection.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rosterLoaded]);
 
   /* Close the city menu on outside clicks / Escape while it is open. */
   useEffect(() => {
@@ -341,13 +347,15 @@ export default function LandingPage() {
       defaults to the first Phase 2 city. */
   const requestDistrictAccess = () => {
     const target =
-      selectedCity.status === "coming_soon"
+      selectedCity?.status === "coming_soon"
         ? selectedCity
-        : (PILOT_CITIES.find((c) => c.status === "coming_soon") ?? selectedCity);
-    openWaitlist(target);
+        : (pilotCities.find((c) => c.status === "coming_soon") ??
+          selectedCity ??
+          sialkotPilot);
+    if (target) openWaitlist(target);
   };
 
-  const submitWaitlist = (event: FormEvent<HTMLFormElement>) => {
+  const submitWaitlist = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!waitlistCity) return;
     const digits = waitlistPhone.replace(/\D/g, "");
@@ -357,13 +365,19 @@ export default function LandingPage() {
       );
       return;
     }
-    appendWaitlistEntry({
+    const ok = await appendWaitlistEntry({
       city: waitlistCity.id,
       city_name: waitlistCity.name_en,
       phone: waitlistPhone.trim(),
       ...(waitlistArea.trim() ? { area: waitlistArea.trim() } : {}),
       timestamp: new Date().toISOString(),
     });
+    if (!ok) {
+      setWaitlistError(
+        "Could not reach the server — please try again in a moment."
+      );
+      return;
+    }
     setToast(
       `You're on the priority notification list for ${waitlistCity.name_en}.`
     );
@@ -417,7 +431,11 @@ export default function LandingPage() {
                   className="flex min-w-0 flex-1 items-center justify-between gap-2 text-left"
                 >
                   <span className="truncate text-sm font-semibold text-slate-900">
-                    {pilotDisplayLabel(selectedCity)}
+                    {selectedCity
+                      ? pilotDisplayLabel(selectedCity)
+                      : rosterLoaded
+                        ? "Select a district"
+                        : "Loading districts…"}
                   </span>
                   <ChevronDown
                     className={`h-4 w-4 shrink-0 text-slate-400 transition-transform duration-150 ${
@@ -432,9 +450,9 @@ export default function LandingPage() {
                     aria-label="Sada-e-Awam cities"
                     className="absolute left-0 right-0 top-full z-40 mt-2 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-xl shadow-emerald-950/5"
                   >
-                    {PILOT_CITIES.map((city) => {
+                    {pilotCities.map((city) => {
                       const isActive = city.status === "active";
-                      const isSelected = city.id === selectedCity.id;
+                      const isSelected = city.id === selectedCity?.id;
                       return (
                         <button
                           key={city.id}
@@ -477,7 +495,7 @@ export default function LandingPage() {
               </div>
 
               {/* Dynamic primary CTA */}
-              {selectedCity.status === "active" ? (
+              {selectedCity?.status === "active" ? (
                 <Link
                   href={`/report?city=${selectedCity.id}`}
                   className="inline-flex w-full shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-[#0F5132] px-6 py-3.5 text-sm font-semibold text-white shadow-xs transition-all duration-150 hover:bg-emerald-900 focus:outline-none focus:ring-2 focus:ring-emerald-600/40 sm:w-auto"
@@ -488,17 +506,18 @@ export default function LandingPage() {
               ) : (
                 <button
                   type="button"
-                  onClick={() => openWaitlist(selectedCity)}
-                  className="inline-flex w-full shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-slate-900 px-6 py-3.5 text-sm font-semibold text-white shadow-xs transition-all duration-150 hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-500/40 sm:w-auto"
+                  onClick={() => selectedCity && openWaitlist(selectedCity)}
+                  disabled={!selectedCity}
+                  className="inline-flex w-full shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-slate-900 px-6 py-3.5 text-sm font-semibold text-white shadow-xs transition-all duration-150 hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-500/40 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
                 >
-                  Notify Me When Live in {selectedCity.name_en} 🔔
+                  Notify Me When Live in {selectedCity?.name_en ?? "…"} 🔔
                 </button>
               )}
             </div>
 
             {/* Dynamic trust ticker */}
             <div aria-live="polite" className="mt-3">
-              {selectedCity.status === "active" ? (
+              {selectedCity?.status === "active" ? (
                 <p className="flex items-center justify-center gap-1.5 text-xs font-medium text-slate-600">
                   <span className="relative flex h-1.5 w-1.5 shrink-0">
                     <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
@@ -514,11 +533,11 @@ export default function LandingPage() {
                 </p>
               ) : (
                 <p className="inline-flex flex-wrap items-center justify-center gap-x-1 rounded-full bg-amber-50 px-3.5 py-1.5 text-xs font-medium text-amber-800 ring-1 ring-amber-200/70">
-                  ⚠️ Municipal dispatch for {selectedCity.name_en} begins in
+                  ⚠️ Municipal dispatch for {selectedCity?.name_en} begins in
                   Phase 2.{" "}
                   <button
                     type="button"
-                    onClick={() => handleCitySelect(sialkotPilot)}
+                    onClick={() => sialkotPilot && handleCitySelect(sialkotPilot)}
                     className="font-bold underline decoration-amber-300 underline-offset-2 transition-colors hover:text-amber-900"
                   >
                     Select Sialkot

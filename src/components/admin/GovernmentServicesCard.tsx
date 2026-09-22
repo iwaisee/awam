@@ -76,7 +76,7 @@ const styleFor = (sector: CoreSector) =>
   };
 
 export default function GovernmentServicesCard() {
-  const { sectors } = useDepartmentRegistry();
+  const { sectors, loaded: registryLoaded } = useDepartmentRegistry();
   const [modalOpen, setModalOpen] = useState(false);
   const [initialSector, setInitialSector] = useState<string | null>(null);
 
@@ -107,6 +107,15 @@ export default function GovernmentServicesCard() {
     setInitialSector(sectorId);
     setModalOpen(true);
   };
+
+  // No seed roster — hold the card skeleton until the Neon registry lands.
+  if (!registryLoaded) {
+    return (
+      <section className="mb-6 rounded-3xl border border-slate-200/90 bg-white p-6 shadow-2xs">
+        <div className="h-40 animate-pulse rounded-2xl bg-slate-100" />
+      </section>
+    );
+  }
 
   return (
     <section className="mb-6 rounded-3xl border border-slate-200/90 bg-white p-6 shadow-2xs">

@@ -3,7 +3,7 @@ import { ACCESS_CODE_PATTERN } from "@/lib/squadFields";
 import { timingSafeEqual } from "node:crypto";
 
 /* Squad access codes — the field-officer credential for the /squad console.
-   Codes live in the server-side app-state store (data/appstate.db, key
+   Codes live in the server-side app-state store (Neon `app_state`, key
    "squad-access") and are NEVER served to browsers: /api/departments serves
    the whole registry publicly, so a code inside the registry document would
    leak. The admin Field Teams console issues/rotates codes via
@@ -16,8 +16,8 @@ export { ACCESS_CODE_PATTERN };
 export const MAX_FAILED_ATTEMPTS = 5;
 export const LOCKOUT_MS = 60_000;
 
-function readCodes(): Record<string, string> {
-  const raw = readState(STORE_KEY);
+async function readCodes(): Promise<Record<string, string>> {
+  const raw = await readState(STORE_KEY);
   if (!raw || typeof raw !== "object") return {};
   const out: Record<string, string> = {};
   for (const [id, code] of Object.entries(raw as Record<string, unknown>)) {
@@ -26,37 +26,40 @@ function readCodes(): Record<string, string> {
   return out;
 }
 
-function writeCodes(codes: Record<string, string>): void {
-  writeState(STORE_KEY, codes);
+async function writeCodes(codes: Record<string, string>): Promise<void> {
+  await writeState(STORE_KEY, codes);
 }
 
-export function hasAccessCode(squadId: string): boolean {
-  return Boolean(readCodes()[squadId]);
+export async function hasAccessCode(squadId: string): Promise<boolean> {
+  const codes = await readCodes();
+  return Boolean(codes[squadId]);
 }
 
-export function accessCodeStatus(squadIds: string[]): Record<string, boolean> {
-  const codes = readCodes();
+export async function accessCodeStatus(
+  squadIds: string[],
+): Promise<Record<string, boolean>> {
+  const codes = await readCodes();
   return Object.fromEntries(squadIds.map((id) => [id, Boolean(codes[id])]));
 }
 
 /** Issue or rotate a squad's access code. Throws on an invalid code shape. */
-export function setAccessCode(squadId: string, code: string): void {
+export async function setAccessCode(squadId: string, code: string): Promise<void> {
   const trimmed = code.trim();
   if (!ACCESS_CODE_PATTERN.test(trimmed)) {
     throw new Error(
       "Access code must be 4-12 letters, numbers or dashes (no spaces).",
     );
   }
-  const codes = readCodes();
+  const codes = await readCodes();
   codes[squadId] = trimmed;
-  writeCodes(codes);
+  await writeCodes(codes);
   clearFailures(squadId);
 }
 
-export function clearAccessCode(squadId: string): void {
-  const codes = readCodes();
+export async function clearAccessCode(squadId: string): Promise<void> {
+  const codes = await readCodes();
   delete codes[squadId];
-  writeCodes(codes);
+  await writeCodes(codes);
   clearFailures(squadId);
 }
 
@@ -96,12 +99,12 @@ export type AccessVerifyResult =
     };
 
 /** Constant-time-ish verification of an officer's access code. */
-export function verifySquadAccess(
+export async function verifySquadAccess(
   squadId: string,
   code: string,
   nowMs: number = Date.now(),
-): AccessVerifyResult {
-  const codes = readCodes();
+): Promise<AccessVerifyResult> {
+  const codes = await readCodes();
   const expected = codes[squadId];
   if (!expected) return { ok: false, reason: "no_code_issued" };
 

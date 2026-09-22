@@ -263,6 +263,24 @@ export interface CategoryRule {
 export type IncidentStatus =
   "triage" | "dispatched" | "in_progress" | "resolved" | "disputed";
 
+/** Live proof-of-presence telemetry attached to a report by the citizen
+    wizard's on-site camera flow. Every field is optional so rows filed
+    before the flow (or by older clients) stay valid. */
+export interface GeoVerification {
+  /** Horizontal accuracy of the GPS fix, ± meters. */
+  accuracy_meters?: number;
+  /** ISO timestamp of the shutter press. */
+  captured_at?: string;
+  /** True — the photo came from the enforced live-capture flow, never a
+      gallery upload. */
+  is_live_capture?: boolean;
+  /** Request user agent, stamped server-side from the request header. */
+  device_user_agent?: string;
+  /** True when the locked coordinates fall outside the pilot district
+      (Submission Audit queue flag — informational, not a rejection). */
+  outside_pilot_district?: boolean;
+}
+
 export interface IncidentReport {
   /** Regional ticket ID, e.g. #SKT-1042. */
   id: string;
@@ -271,7 +289,6 @@ export interface IncidentReport {
   city_name: string;
   area_id: string;
   area_name: string;
-  uc_number?: string;
   jurisdiction: JurisdictionType;
   category_id: string;
   category_title: string;
@@ -285,6 +302,10 @@ export interface IncidentReport {
   selected_tags?: string[];
   photo_url?: string;
   coordinates?: { lat: number; lng: number };
+  /** Proof-of-presence telemetry from the live camera flow (may be absent on
+      rows filed before the flow existed). Stored as JSONB; the device user
+      agent is stamped server-side from the request header, not the client. */
+  geo_verification?: GeoVerification;
   citizen_name: string;
   citizen_phone: string;
   status: IncidentStatus;
@@ -305,7 +326,6 @@ export interface IncidentReport {
   /** Work notes summarising the fix, filed by the squad lead. */
   resolution_notes?: string;
   /** Materials / inventory consumed, e.g. "1x 200kVA fuse, 12m cable". */
-  materials_used?: string;
 }
 
 /* ------------------------------ Rule engine ------------------------------- */

@@ -124,7 +124,11 @@ export default function SquadPortal() {
             isAssignedToSquad(r, session.squadName) &&
             r.status === "resolved",
         )
-        .sort((a, b) => (b.resolved_at ?? "").localeCompare(a.resolved_at ?? "")),
+        .sort(
+          (a, b) =>
+            new Date(b.resolved_at ?? 0).getTime() -
+            new Date(a.resolved_at ?? 0).getTime(),
+        ),
     [reports, session],
   );
 

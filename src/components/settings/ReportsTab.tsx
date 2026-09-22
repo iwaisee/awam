@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import IncidentCard from "@/components/feed/IncidentCard";
 import WorkOrderDrawer from "@/components/feed/WorkOrderDrawer";
-import type { FeedReport } from "@/data/mockData";
+import type { FeedReport } from "@/types/report";
 import {
   agencyCode,
   reportTitle,

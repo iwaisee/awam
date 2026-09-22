@@ -12,7 +12,7 @@ import {
   Zap,
 } from "lucide-react";
 import Image from "next/image";
-import type { FeedReport } from "@/data/mockData";
+import type { FeedReport } from "@/types/report";
 import SharePopover from "./SharePopover";
 
 /* ----------------------------------------------------------------------------

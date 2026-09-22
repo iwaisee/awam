@@ -1,5 +1,5 @@
 /**
- * Read an image file into a localStorage-safe data URL, downscaled via canvas
+ * Read an image file into an inline data URL, downscaled via canvas,
  * so a full-size camera photo can never blow the storage quota. Portraits are
  * cover-cropped square (no distortion in the circular frame); stamps keep
  * their aspect ratio. Falls back to the raw data URL if canvas is unusable.

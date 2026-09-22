@@ -19,11 +19,11 @@ function agencyMatches(code: string, assignedAgency: string): boolean {
   return a === b || a.startsWith(b) || b.startsWith(a);
 }
 
-export function pickSquadForReport(report: {
+export async function pickSquadForReport(report: {
   assigned_agency: string;
   area_name: string;
-}): string | null {
-  const registry = readRegistry();
+}): Promise<string | null> {
+  const registry = await readRegistry();
   if (!Array.isArray(registry)) return null;
   const area = report.area_name.toLowerCase();
   const ownAgency = (
@@ -31,7 +31,7 @@ export function pickSquadForReport(report: {
   ).toLowerCase();
 
   const busyUnits = new Set(
-    listReports()
+    (await listReports())
       .filter((r) => r.status === "dispatched" || r.status === "in_progress")
       .map((r) => (r.assigned_unit ?? "").toLowerCase())
       .filter(Boolean)

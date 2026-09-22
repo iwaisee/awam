@@ -1,15 +1,11 @@
 import { NextResponse } from "next/server";
 import { readRegistry, resetRegistry, writeRegistry } from "@/lib/departmentsDb";
-import {
-  DEPARTMENT_SECTORS,
-  type CoreSector,
-} from "@/data/departmentRegistry";
+import type { CoreSector } from "@/data/departmentRegistry";
 
 /* Registry transport — GET/PUT/DELETE for the single departments registry
-   document. GET falls back to the built-in seed until something is saved,
-   with `seeded` telling clients whether a localStorage migration should run.
-   DELETE is a dev-only reset so a browser's localStorage registry can be
-   re-migrated after testing. */
+   document. The Neon `registry` table is the only source: an unsaved store
+   serves an empty roster with `seeded: false` (clients render their loading /
+   empty states — no built-in fallback roster exists). */
 
 function isValidRegistry(value: unknown): value is CoreSector[] {
   return (
@@ -24,11 +20,11 @@ function isValidRegistry(value: unknown): value is CoreSector[] {
 }
 
 export async function GET() {
-  const saved = readRegistry();
+  const saved = await readRegistry();
   if (isValidRegistry(saved)) {
     return NextResponse.json({ sectors: saved, seeded: true });
   }
-  return NextResponse.json({ sectors: DEPARTMENT_SECTORS, seeded: false });
+  return NextResponse.json({ sectors: [], seeded: false });
 }
 
 export async function PUT(request: Request) {
@@ -40,7 +36,7 @@ export async function PUT(request: Request) {
         { status: 400 },
       );
     }
-    writeRegistry(body.sectors);
+    await writeRegistry(body.sectors);
     return NextResponse.json({ success: true });
   } catch (error) {
     return NextResponse.json(
@@ -63,6 +59,6 @@ export async function DELETE() {
       { status: 403 },
     );
   }
-  resetRegistry();
+  await resetRegistry();
   return NextResponse.json({ success: true });
 }

@@ -7,6 +7,7 @@ import type {
   CityItem,
 } from "@/types/civic";
 import type { ReportFormData } from "@/types/report";
+import { isOutsidePilotDistrict } from "@/lib/pilotBoundary";
 
 /* Resolves wizard selections against the coverage + taxonomy state and builds
    the POST body for /api/reports. Single source of truth for the cascade. */
@@ -52,7 +53,6 @@ export function buildReportPayload(
     city_name: city.name_en,
     area_id: area.id,
     area_name: area.name_en,
-    uc_number: area.uc_number ?? "",
     jurisdiction: area.jurisdiction,
     category_id: rule.id,
     category_title: rule.name_en,
@@ -66,5 +66,25 @@ export function buildReportPayload(
     selected_tags: formData.selectedTags.slice(0, 3),
     citizen_name: formData.isAnonymous ? "Anonymous" : "Registered Citizen",
     citizen_phone: formData.isAnonymous ? "" : formData.phoneNumber.trim(),
+    // Proof-of-presence telemetry from the live camera flow. Sent only when
+    // the citizen completed a verified capture; the API rejects nothing for
+    // its absence (rows filed before the flow existed carry no telemetry).
+    ...(formData.geo && formData.capturedAt
+      ? {
+          coordinates: {
+            lat: formData.geo.latitude,
+            lng: formData.geo.longitude,
+          },
+          location_accuracy_meters: formData.geo.accuracyMeters,
+          captured_at: formData.capturedAt,
+          is_live_capture: true as const,
+          device_user_agent:
+            typeof navigator !== "undefined" ? navigator.userAgent : "",
+          outside_pilot_district: isOutsidePilotDistrict(
+            formData.geo.latitude,
+            formData.geo.longitude
+          ),
+        }
+      : {}),
   };
 }

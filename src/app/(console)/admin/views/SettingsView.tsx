@@ -116,8 +116,6 @@ const FACTORY_SYSTEM_PREFS: SystemPrefs = {
   maintenanceFreeze: false,
 };
 
-const SYSTEM_PREFS_KEY = "sada_system_prefs";
-
 function normalizeSystemPrefs(raw: unknown): SystemPrefs {
   if (!raw || typeof raw !== "object") return FACTORY_SYSTEM_PREFS;
   const stored = raw as Partial<SystemPrefs>;
@@ -155,33 +153,22 @@ function normalizeSystemPrefs(raw: unknown): SystemPrefs {
 }
 
 const systemPrefsListeners = new Set<() => void>();
-let cachedPrefsRaw: string | null = null;
 let cachedPrefs: SystemPrefs = FACTORY_SYSTEM_PREFS;
 
 function getSystemPrefsSnapshot(): SystemPrefs {
-  const raw = window.localStorage.getItem(SYSTEM_PREFS_KEY);
-  if (raw !== cachedPrefsRaw) {
-    cachedPrefsRaw = raw;
-    let parsed: unknown = null;
-    if (raw) {
-      try {
-        parsed = JSON.parse(raw);
-      } catch {
-        parsed = null; // Corrupt storage — fall back to the factory template.
-      }
-    }
-    cachedPrefs = normalizeSystemPrefs(parsed);
-  }
   return cachedPrefs;
 }
 
 function subscribeSystemPrefs(listener: () => void) {
   systemPrefsListeners.add(listener);
-  window.addEventListener("storage", listener);
   return () => {
     systemPrefsListeners.delete(listener);
-    window.removeEventListener("storage", listener);
   };
+}
+
+function writeSystemPrefs(next: SystemPrefs) {
+  cachedPrefs = normalizeSystemPrefs(next);
+  systemPrefsListeners.forEach((listener) => listener());
 }
 
 let prefsServerSyncStarted = false;
@@ -196,26 +183,14 @@ async function syncSystemPrefsFromServer(): Promise<void> {
     if (!res.ok) return;
     const data = (await res.json()) as { value?: unknown; seeded?: boolean };
     if (data.seeded) {
+      // Adopt the shared document.
       const incoming = normalizeSystemPrefs(data.value);
       if (JSON.stringify(incoming) !== JSON.stringify(getSystemPrefsSnapshot())) {
-        try {
-          window.localStorage.setItem(SYSTEM_PREFS_KEY, JSON.stringify(incoming));
-        } catch {
-          /* storage full — the in-memory copy still applies */
-        }
-        cachedPrefsRaw = null;
-        systemPrefsListeners.forEach((listener) => listener());
+        writeSystemPrefs(incoming);
       }
-    } else {
-      // Fresh server — migrate the local preferences up.
-      await fetch("/api/state/system-prefs", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ value: getSystemPrefsSnapshot() }),
-      });
     }
   } catch {
-    /* server unreachable — the local cache keeps working */
+    /* server unreachable — surfaces render the factory prefs */
   }
 }
 
@@ -231,14 +206,8 @@ function useSystemPrefs() {
   }, []);
 
   const saveSystemPrefs = useCallback((next: SystemPrefs) => {
-    try {
-      window.localStorage.setItem(SYSTEM_PREFS_KEY, JSON.stringify(next));
-    } catch {
-      // Storage full — in-memory subscribers still update.
-    }
-    cachedPrefsRaw = null; // Invalidate so the next read re-parses from storage.
-    systemPrefsListeners.forEach((listener) => listener());
-    // Persist to the shared store — localStorage is the synchronous cache.
+    writeSystemPrefs(next);
+    // Persist to the shared Neon store.
     void fetch("/api/state/system-prefs", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },

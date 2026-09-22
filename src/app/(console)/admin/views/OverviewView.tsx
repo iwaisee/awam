@@ -1,7 +1,7 @@
 "use client";
 
 /* Command Radar (/admin/overview) — executive municipal command view.
-   Live KPI tiles fed by the real report ledger — the SQLite ledger starts
+   Live KPI tiles fed by the real report ledger — the Neon ledger starts
    empty, so tiles settle on real zeros until citizens file. */
 
 import { useEffect, useMemo, useState } from "react";

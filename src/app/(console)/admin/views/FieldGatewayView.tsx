@@ -417,7 +417,7 @@ type SubTab = "queue" | "squads";
 
 export default function FieldGatewayView() {
   const [subTab, setSubTab] = useState<SubTab>("queue");
-  const { sectors } = useDepartmentRegistry();
+  const { sectors, loaded: registryLoaded } = useDepartmentRegistry();
   const [reports, setReports] = useState<IncidentReport[] | null>(null);
   /* Session overlays (status flips, zone edits, modal edits) ride on top of
      the registry-derived roster and survive ledger re-syncs until reload. */
@@ -532,11 +532,11 @@ export default function FieldGatewayView() {
     () =>
       reports
         ?.filter((r) => r.status === "dispatched" || r.status === "in_progress")
-        .sort((a, b) => {
-          const at = a.dispatched_at ?? a.created_at;
-          const bt = b.dispatched_at ?? b.created_at;
-          return bt.localeCompare(at);
-        }) ?? [],
+        .sort(
+          (a, b) =>
+            new Date(b.dispatched_at ?? b.created_at).getTime() -
+            new Date(a.dispatched_at ?? a.created_at).getTime(),
+        ) ?? [],
     [reports],
   );
 
@@ -662,6 +662,24 @@ export default function FieldGatewayView() {
       void refreshReports();
     })();
   };
+
+  // First paint waits for the two live sources (Neon registry + ledger) so
+  // no seed roster or zeroed KPIs ever flash before the real data.
+  if (!registryLoaded || reports === null) {
+    return (
+      <div className="mx-auto max-w-7xl pb-12">
+        <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {[0, 1, 2, 3].map((i) => (
+            <div
+              key={i}
+              className="h-28 animate-pulse rounded-2xl border border-slate-200 bg-white"
+            />
+          ))}
+        </div>
+        <div className="h-72 animate-pulse rounded-2xl border border-slate-200 bg-white" />
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-7xl pb-12">

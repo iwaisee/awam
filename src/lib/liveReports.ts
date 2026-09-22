@@ -53,9 +53,7 @@ export function reportToIncident(report: IncidentReport): TriageIncident {
     demoIcon: "community",
     hazard: `${report.category_title} — ${report.area_name}, ${report.city_name}`,
     location: report.area_name,
-    uc: [report.uc_number, report.city_name]
-      .filter((part) => part && part !== "—")
-      .join(", "),
+    uc: report.city_name,
     votes: report.upvotes,
     elapsed: elapsedSince(report.created_at),
     agency: report.assigned_agency,
@@ -70,7 +68,7 @@ export function reportToIncident(report: IncidentReport): TriageIncident {
     photoUrl: report.photo_url,
     photoTint: "from-emerald-500 to-emerald-900",
     gps: report.coordinates
-      ? `${report.coordinates.lat.toFixed(4)}° N, ${report.coordinates.lng.toFixed(4)}° E (±8m)`
+      ? `${report.coordinates.lat.toFixed(4)}° N, ${report.coordinates.lng.toFixed(4)}° E (±${Math.round(report.geo_verification?.accuracy_meters ?? 8)}m)`
       : "",
     voiceTranscript: report.description,
     tags: [],

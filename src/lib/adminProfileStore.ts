@@ -27,18 +27,20 @@ export interface AdminProfile {
   allowWhatsappEscalations: boolean;
 }
 
+/** Neutral starting document — no fabricated persona. The real profile lives
+    in the Neon app_state doc behind /api/state/admin-profile. */
 export const DEFAULT_ADMIN_PROFILE: AdminProfile = {
-  fullName: "Municipal Commissioner, Sialkot",
-  designation: "Phase 1 Pilot Operations Lead",
+  fullName: "",
+  designation: "",
   role: "admin",
-  cadre: "PAS (Pakistan Administrative Service) - BPS-20",
-  serviceNumber: "SK-MCS-89410-E",
-  department: "Municipal Corporation Sialkot (MCS)",
-  posting: "MCS Complex, Sialkot",
-  email: "commissioner.mcs@localgov.punjab.gov.pk",
-  hotline: "+92 300 0001122",
-  landline: "052-9260271 Ext: 402",
-  staffOfficer: "+92 321 5554321 (Staff Officer to Commissioner)",
+  cadre: "",
+  serviceNumber: "",
+  department: "",
+  posting: "",
+  email: "",
+  hotline: "",
+  landline: "",
+  staffOfficer: "",
   avatarUrl: null,
   signatureUrl: null,
   showNameOnProofs: true,
@@ -46,11 +48,9 @@ export const DEFAULT_ADMIN_PROFILE: AdminProfile = {
   allowWhatsappEscalations: false,
 };
 
-const STORAGE_KEY = "sada_admin_profile";
-
 /**
  * Merge a stored (possibly stale/partial) profile over the seed defaults so
- * schema drift in older localStorage payloads can never crash the console.
+ * schema drift in older shared documents can never crash the console.
  */
 function normalizeProfile(raw: unknown): AdminProfile {
   if (!raw || typeof raw !== "object") return DEFAULT_ADMIN_PROFILE;
@@ -97,34 +97,20 @@ function normalizeProfile(raw: unknown): AdminProfile {
   };
 }
 
-/* --------------------- External store over localStorage -------------------- */
+/* ---------------------- External store over memory ------------------------ */
 /*
- * The profile lives in localStorage, so it is modelled as an external store
- * read through useSyncExternalStore: server and hydration renders use the
- * seed snapshot, and every subscriber (header badge, sidebar card, settings
- * form) re-renders in the same tick whenever a save is written. Writes also
- * propagate across browser tabs via the native `storage` event.
+ * Neon is the only store. The in-memory document is modelled as an external
+ * store read through useSyncExternalStore: server and hydration renders use
+ * the neutral snapshot, and every subscriber (header badge, sidebar card,
+ * settings form) re-renders in the same tick whenever the Neon document is
+ * adopted or a save is written.
  */
 
 const listeners = new Set<() => void>();
 
-let cachedRaw: string | null = null;
 let cachedProfile: AdminProfile = DEFAULT_ADMIN_PROFILE;
 
 function getSnapshot(): AdminProfile {
-  const raw = window.localStorage.getItem(STORAGE_KEY);
-  if (raw !== cachedRaw) {
-    cachedRaw = raw;
-    let parsed: unknown = null;
-    if (raw) {
-      try {
-        parsed = JSON.parse(raw);
-      } catch {
-        parsed = null; // Corrupt storage — fall back to the seed profile.
-      }
-    }
-    cachedProfile = normalizeProfile(parsed);
-  }
   return cachedProfile;
 }
 
@@ -134,20 +120,13 @@ function getServerSnapshot(): AdminProfile {
 
 function subscribe(listener: () => void) {
   listeners.add(listener);
-  window.addEventListener("storage", listener);
   return () => {
     listeners.delete(listener);
-    window.removeEventListener("storage", listener);
   };
 }
 
 function writeProfile(next: AdminProfile) {
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-  } catch {
-    // Storage full (oversized image) — in-memory subscribers still update.
-  }
-  cachedRaw = null; // Invalidate so the next read re-parses from storage.
+  cachedProfile = normalizeProfile(next);
   listeners.forEach((listener) => listener());
 }
 
@@ -157,8 +136,7 @@ function writeProfile(next: AdminProfile) {
 /*
  * The database is authoritative: on first use the stored document is pulled
  * into the local cache, and when the server has nothing yet (fresh install)
- * the local profile migrates up instead. localStorage stays as the
- * synchronous cache that useSyncExternalStore reads.
+ * the console renders the neutral document until an admin fills it in.
  */
 
 let serverSyncStarted = false;
@@ -174,22 +152,13 @@ async function syncWithServer(): Promise<void> {
       seeded?: boolean;
     };
     if (data.seeded && data.value) {
-      // Server has the profile — refresh the local cache from it.
-      const incoming = JSON.stringify(data.value);
-      if (incoming !== JSON.stringify(getSnapshot())) {
-        writeProfile(normalizeProfile(data.value));
+      // Server has the profile — adopt the shared document.
+      if (JSON.stringify(data.value) !== JSON.stringify(getSnapshot())) {
+        writeProfile(data.value);
       }
-    } else {
-      const local = getSnapshot();
-      // Fresh server — migrate the local profile up.
-      await fetch("/api/state/admin-profile", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ value: local }),
-      });
     }
   } catch {
-    /* server unreachable — the local cache keeps working */
+    /* server unreachable — surfaces render the neutral profile */
   }
 }
 
@@ -206,7 +175,7 @@ export function useAdminProfile() {
 
   const saveProfile = useCallback((next: AdminProfile) => {
     writeProfile(next);
-    // Persist to the shared store — localStorage is the synchronous cache.
+    // Persist to the shared Neon store.
     void fetch("/api/state/admin-profile", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },

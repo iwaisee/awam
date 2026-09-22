@@ -23,7 +23,7 @@ export async function GET(request: Request) {
     .map((id) => id.trim())
     .filter(Boolean)
     .slice(0, 200);
-  return NextResponse.json({ hasCode: accessCodeStatus(ids) });
+  return NextResponse.json({ hasCode: await accessCodeStatus(ids) });
 }
 
 export async function PUT(request: Request) {
@@ -45,7 +45,7 @@ export async function PUT(request: Request) {
         { status: 400 },
       );
     }
-    setAccessCode(body.squadId.trim(), body.code);
+    await setAccessCode(body.squadId.trim(), body.code);
     return NextResponse.json({ success: true });
   } catch (error) {
     return NextResponse.json(
@@ -70,6 +70,6 @@ export async function DELETE(request: Request) {
       { status: 400 },
     );
   }
-  clearAccessCode(squadId);
+  await clearAccessCode(squadId);
   return NextResponse.json({ success: true });
 }

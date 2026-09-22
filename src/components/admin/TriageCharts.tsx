@@ -2,7 +2,10 @@
 
 /* Interactive mini-charts for the triage telemetry strip (recharts).
    All three render inside clickable KPI cards, so they stay hover-only —
-   clicks bubble to the card and keep toggling its segment filter. */
+   clicks bubble to the card and keep toggling its segment filter.
+   accessibilityLayer={false} keeps recharts from giving the <svg> a tabindex,
+   which made every click paint the browser's default focus ring on the chart;
+   the charts are aria-hidden decorations, the card is the real control. */
 
 import {
   Bar,
@@ -46,7 +49,12 @@ export function DailyColumnChart({
 }) {
   return (
     <ResponsiveContainer width="100%" height={112}>
-      <BarChart data={data} margin={{ top: 6, right: 4, bottom: 0, left: 0 }} barCategoryGap="30%">
+      <BarChart
+        data={data}
+        margin={{ top: 6, right: 4, bottom: 0, left: 0 }}
+        barCategoryGap="30%"
+        accessibilityLayer={false}
+      >
         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
         <XAxis
           dataKey="label"
@@ -103,7 +111,12 @@ export function SeverityBars({ data }: { data: SeveritySlice[] }) {
   const total = data.reduce((sum, slice) => sum + slice.value, 0);
   return (
     <ResponsiveContainer width="100%" height={112}>
-      <BarChart data={data} margin={{ top: 6, right: 4, bottom: 0, left: 0 }} barCategoryGap="32%">
+      <BarChart
+        data={data}
+        margin={{ top: 6, right: 4, bottom: 0, left: 0 }}
+        barCategoryGap="32%"
+        accessibilityLayer={false}
+      >
         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
         <XAxis
           dataKey="name"

@@ -21,7 +21,7 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function GET() {
-  return NextResponse.json({ session: readSquadSession() });
+  return NextResponse.json({ session: await readSquadSession() });
 }
 
 export async function POST(request: Request) {
@@ -42,7 +42,7 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
-    const verdict = verifySquadAccess(body.squadId.trim(), body.pin);
+    const verdict = await verifySquadAccess(body.squadId.trim(), body.pin);
     if (!verdict.ok) {
       if (verdict.reason === "no_code_issued") {
         return NextResponse.json(
@@ -69,7 +69,7 @@ export async function POST(request: Request) {
         { status: 401 },
       );
     }
-    const session = bindSquadSession(body.squadId.trim());
+    const session = await bindSquadSession(body.squadId.trim());
     return NextResponse.json({ success: true, session });
   } catch (error) {
     const message =
@@ -97,7 +97,7 @@ export async function PATCH(request: Request) {
         { status: 400 },
       );
     }
-    const session = setSquadAvailability(body.availability as SquadAvailability);
+    const session = await setSquadAvailability(body.availability as SquadAvailability);
     return NextResponse.json({ success: true, session });
   } catch (error) {
     const message =
@@ -113,6 +113,6 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE() {
-  unbindSquadSession();
+  await unbindSquadSession();
   return NextResponse.json({ success: true });
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { FeedReport } from "@/data/mockData";
+import type { FeedReport } from "@/types/report";
 import type { CategoryId, } from "@/types/report";
 import type { IncidentReport } from "@/types/civic";
 
@@ -110,23 +110,33 @@ export function useLiveFeedReports(refreshKey = 0): {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/reports", { cache: "no-store" })
-      .then((res) =>
-        res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`)),
-      )
-      .then((data: unknown) => {
-        if (!cancelled) {
-          setState({
-            key: refreshKey,
-            raw: Array.isArray(data) ? (data as IncidentReport[]) : [],
-            fetchedAt: Date.now(),
-          });
-        }
-      })
-      .catch(() => {
-        if (!cancelled)
+    /** One retry: a dev-route recompile or a Neon cold-start blip can fail
+        the first hit — a single late retry spares the citizen a false
+        "no reports" board without spinning forever. */
+    const load = (attempt: number): void => {
+      fetch("/api/reports", { cache: "no-store" })
+        .then((res) =>
+          res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`)),
+        )
+        .then((data: unknown) => {
+          if (!cancelled) {
+            setState({
+              key: refreshKey,
+              raw: Array.isArray(data) ? (data as IncidentReport[]) : [],
+              fetchedAt: Date.now(),
+            });
+          }
+        })
+        .catch(() => {
+          if (cancelled) return;
+          if (attempt < 1) {
+            window.setTimeout(() => load(attempt + 1), 1500);
+            return;
+          }
           setState((prev) => ({ key: refreshKey, raw: prev.raw, fetchedAt: prev.fetchedAt }));
-      });
+        });
+    };
+    load(0);
     return () => {
       cancelled = true;
     };

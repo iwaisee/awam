@@ -82,6 +82,7 @@ export default function CategoriesView() {
   const {
     cities,
     categories,
+    hydrated: coverageLoaded,
     addCategory,
     updateCategory,
     removeCategory,
@@ -216,6 +217,16 @@ export default function CategoriesView() {
       : cat.allowed_jurisdictions.join(", ");
     return { cityPart, jurPart };
   };
+
+  // Category rules come from the Neon coverage document — skeleton until it
+  // arrives so the table never renders a false "no rules" state.
+  if (!coverageLoaded) {
+    return (
+      <div className="space-y-6">
+        <div className="h-64 animate-pulse rounded-2xl border border-slate-200 bg-white" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

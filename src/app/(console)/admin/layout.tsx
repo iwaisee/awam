@@ -204,9 +204,9 @@ export default function AdminLayout({
   const railCollapsed = collapsed && !mobileNavOpen;
 
   /* Nav chips show ledger counts only — every value here comes from a real
-     data source, never a seed. The report ledger (data/reports.db, starts
-     empty) is the only one that exists, so only the Reports & Complaints
-     chip ever renders, and only while at least one real report is filed.
+     data source, never a seed. The report ledger (Neon, starts empty) is the
+     only one that exists, so only the Reports & Complaints chip ever
+     renders, and only while at least one real report is filed.
      The sentinel review queue and the field-unit roster live in view-local
      state with no shared registry yet — no real count exists to show. */
   const [reportCount, setReportCount] = useState<number | null>(null);

@@ -84,8 +84,8 @@ function FeedHub() {
   const [toast, setToast] = useState<string | null>(null);
   const [drawerToken, setDrawerToken] = useState<string | null>(null);
 
-  /* The feed is the live SQLite ledger — every card below is a real submission. */
-  const { reports: liveReports } = useLiveFeedReports();
+  /* The feed is the live Neon ledger — every card below is a real submission. */
+  const { reports: liveReports, loading: feedLoading } = useLiveFeedReports();
 
   const recentCount = liveReports.filter((r) => r.hoursAgo <= 6).length;
 
@@ -283,7 +283,17 @@ function FeedHub() {
         </div>
 
         {/* --------------------------- Content area -------------------------- */}
-        {reports.length === 0 ? (
+        {feedLoading ? (
+          /* ------------------------- Loading skeleton ----------------------- */
+          <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+            {[0, 1, 2, 3].map((i) => (
+              <div
+                key={i}
+                className="h-64 animate-pulse rounded-3xl border border-slate-200 bg-white"
+              />
+            ))}
+          </div>
+        ) : reports.length === 0 ? (
           /* -------------------------- Empty state -------------------------- */
           <div className="flex flex-col items-center rounded-3xl border border-emerald-100 bg-white p-12 text-center shadow-2xs">
             <span className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-50 ring-1 ring-emerald-100">

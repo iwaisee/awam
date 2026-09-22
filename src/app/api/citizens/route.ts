@@ -19,7 +19,11 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function GET() {
-  const profiles = deriveCitizenProfiles(listReports(), listCitizenAdminStates());
+  const [reports, adminStates] = await Promise.all([
+    listReports(),
+    listCitizenAdminStates(),
+  ]);
+  const profiles = deriveCitizenProfiles(reports, adminStates);
   return NextResponse.json(profiles);
 }
 
@@ -52,7 +56,7 @@ export async function PATCH(request: Request) {
       );
     }
 
-    const next = updateCitizenAdminState(key, {
+    const next = await updateCitizenAdminState(key, {
       badgeOverride:
         typeof body.badge_override === "boolean" ? body.badge_override : undefined,
       scoreModifier:

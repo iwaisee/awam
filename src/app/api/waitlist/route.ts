@@ -14,13 +14,13 @@ interface CityWaitlistEntry {
   timestamp: string;
 }
 
-function readList(): CityWaitlistEntry[] {
-  const parsed = readState(WAITLIST_KEY);
+async function readList(): Promise<CityWaitlistEntry[]> {
+  const parsed = await readState(WAITLIST_KEY);
   return Array.isArray(parsed) ? (parsed as CityWaitlistEntry[]) : [];
 }
 
 export async function GET() {
-  return NextResponse.json({ entries: readList() });
+  return NextResponse.json({ entries: await readList() });
 }
 
 export async function POST(request: Request) {
@@ -40,13 +40,13 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
-    const list = readList();
+    const list = await readList();
     // One signup per phone per city — repeat submits refresh the timestamp.
     const deduped = list.filter(
       (e) => !(e.phone === entry.phone && e.city === entry.city)
     );
     deduped.push(entry);
-    writeState(WAITLIST_KEY, deduped);
+    await writeState(WAITLIST_KEY, deduped);
     return NextResponse.json({ success: true, entries: deduped.length });
   } catch (error) {
     return NextResponse.json(

@@ -1,6 +1,6 @@
 "use client";
 
-import { Eye, EyeOff, MapPin, Tag, AlertTriangle, Send } from "lucide-react";
+import { Eye, EyeOff, MapPin, Tag, AlertTriangle, Send, ShieldCheck } from "lucide-react";
 import { useCoverage } from "@/context/CoverageContext";
 import { resolveLocation, resolveVisibleCategories } from "@/lib/reportSubmit";
 import { SEVERITY_META } from "@/types/report";
@@ -117,6 +117,23 @@ export default function StepReview({
         {formData.files.length > 0 && (
           <p className="mt-2 text-xs text-ink-soft">
             {formData.files.length} photo{formData.files.length > 1 ? "s" : ""} attached
+          </p>
+        )}
+        {formData.files.length > 0 && formData.geo && (
+          <p className="mt-1.5 flex items-center gap-1.5 text-xs font-semibold text-emerald-700">
+            <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
+            Presence verified — live capture (±
+            {Math.round(formData.geo.accuracyMeters)}m GPS
+            {formData.capturedAt
+              ? `, ${new Intl.DateTimeFormat("en-GB", {
+                  timeZone: "Asia/Karachi",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                  second: "2-digit",
+                  hour12: false,
+                }).format(new Date(formData.capturedAt))} PKT`
+              : ""}
+            )
           </p>
         )}
       </section>

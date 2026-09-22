@@ -11,7 +11,6 @@ import {
   MapPinned,
   Navigation,
   Radar,
-  RadioTower,
   Route,
   Search,
   SearchCheck,
@@ -19,10 +18,8 @@ import {
   Settings,
   ShieldAlert,
   Shuffle,
-  TicketCheck,
   ThumbsUp,
   Truck,
-  UserCheck,
   Users,
   Workflow,
 } from "lucide-react";
@@ -32,8 +29,8 @@ export const metadata: Metadata = {
 };
 
 /* ----------------------------------------------------------------------------
- * Flow — a read-only user-journey map of everything actually built: four
- * lanes (Citizen, Agency Gateway, Dispatch Supervisor, Executive DG) drawn as
+ * Flow — a read-only user-journey map of everything actually built: three
+ * lanes (Citizen, Dispatch Supervisor, Executive DG) drawn as
  * clickable flowcharts. Every node deep-links to the real route it
  * represents. Additive page only — no existing file was modified.
  * -------------------------------------------------------------------------- */
@@ -316,7 +313,7 @@ export default function FlowPage() {
                   kind="system"
                   icon={Database}
                   title="POST /api/reports"
-                  sub="Validates payload → status: triage → issues token #SKT-XXXX → caches to sada_my_reports"
+                  sub="Validates payload → status: triage → issues token #SKT-XXXX → stored in the Neon ledger"
                 />
                 <VArrow label="ticket issued" />
                 <Node
@@ -356,7 +353,7 @@ export default function FlowPage() {
               sub="triage → dispatched (assigned_unit + dispatched_at) → in_progress → resolved · disputed — one SQLite row drives every screen"
             />
           </div>
-          <VArrow label="agency acts (lane 03)" />
+          <VArrow label="dispatch acts (lane 02)" />
           <div className="w-full max-w-[360px]">
             <Node
               href="/track?id=SKT-1042"
@@ -409,88 +406,10 @@ export default function FlowPage() {
           </div>
         </Lane>
 
-        {/* ===================== Lane 2 — Agency ======================= */}
-        <Lane
-          id="agency"
-          num="02"
-          icon={RadioTower}
-          title="Agency Gateway Journey"
-          urdu="محکمانہ پورٹل"
-          blurb="Department operators working their own queue through the public Operations Gateway."
-        >
-          <div className="w-full max-w-[380px]">
-            <Node
-              kind="entry"
-              href="/portal"
-              icon={LogIn}
-              title="/portal — Operations Gateway"
-              sub="“Official Government & Municipal Access Only” · 6 agency cards with hotlines"
-            />
-          </div>
-          <VArrow />
-          <div className="w-full max-w-[380px]">
-            <Node
-              href="/portal/mcs"
-              icon={ListFilter}
-              title="Pick your agency"
-              sub="MCS · SWMC · GEPCO · Traffic · MCS-Roads · DC Office"
-              tags={["{dept}"]}
-            />
-          </div>
-          <VArrow />
-          <div className="w-full max-w-[380px]">
-            <Node
-              href="/portal/gepco"
-              icon={ClipboardList}
-              title="Department triage queue"
-              sub="Zone filter — All / Cantonment / City / Villages · case cards with stats"
-              tags={["demo"]}
-            />
-          </div>
-          <VArrow />
-          <div className="w-full max-w-[320px]">
-            <Node
-              kind="decision"
-              icon={Shuffle}
-              title="What happens to this case?"
-              sub="Action modals over the selected card"
-            />
-          </div>
-          <div className="grid w-full gap-3 pt-1 sm:grid-cols-3">
-            <div className="flex flex-col items-center gap-2">
-              <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-[9.5px] font-extrabold uppercase tracking-wide text-emerald-800">
-                Assign
-              </span>
-              <Node icon={UserCheck} title="Assign crew" sub="Pick from the crew roster" />
-            </div>
-            <div className="flex flex-col items-center gap-2">
-              <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-[9.5px] font-extrabold uppercase tracking-wide text-emerald-800">
-                Resolve
-              </span>
-              <Node icon={TicketCheck} title="Mark resolved" sub="Close the case" />
-            </div>
-            <div className="flex flex-col items-center gap-2">
-              <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-[9.5px] font-extrabold uppercase tracking-wide text-emerald-800">
-                Transfer
-              </span>
-              <Node icon={Route} title="Transfer" sub="Move between zones / departments" />
-            </div>
-          </div>
-          <VArrow />
-          <div className="w-full max-w-[400px]">
-            <Node
-              icon={ListFilter}
-              title="Back to the filtered queue"
-              sub="Actions live in client state today — Phase 2 wires them to the ledger behind agency-scoped Row-Level Security"
-              tags={["demo", "P2"]}
-            />
-          </div>
-        </Lane>
-
-        {/* ===================== Lane 3 — Dispatch ===================== */}
+        {/* ===================== Lane 2 — Dispatch ===================== */}
         <Lane
           id="dispatch"
-          num="03"
+          num="02"
           icon={Truck}
           title="Dispatch Supervisor Journey"
           urdu="ڈسپیچ سپر وائزر"
@@ -630,10 +549,10 @@ export default function FlowPage() {
           </div>
         </Lane>
 
-        {/* ===================== Lane 4 — Executive ==================== */}
+        {/* ===================== Lane 3 — Executive ==================== */}
         <Lane
           id="executive"
-          num="04"
+          num="03"
           icon={Users}
           title="Executive DG Journey"
           urdu="نگران ڈائریکٹر جنرل"
@@ -664,7 +583,7 @@ export default function FlowPage() {
               href="/admin/territories"
               icon={MapPinned}
               title="Territories & Coverage"
-              sub="City → zone → area editor · persisted to sada_coverage_data"
+              sub="City → zone → area editor · persisted to the Neon coverage document"
             />
           </div>
           <VArrow />
@@ -673,7 +592,7 @@ export default function FlowPage() {
               href="/admin/categories"
               icon={Settings}
               title="Categories & SLA Rules"
-              sub="Taxonomy + SLA hour editor · persisted to sada_category_rules"
+              sub="Taxonomy + SLA hour editor · persisted to the Neon coverage document"
             />
           </div>
           <VArrow />
@@ -711,15 +630,14 @@ export default function FlowPage() {
                 </span>
               </h2>
               <p className="mt-1 text-[13px] leading-6 text-slate-500">
-                Fixed jumps that carry users between the public site, the
-                gateways and the console.
+                Fixed jumps that carry users between the public site and the
+                console.
               </p>
             </div>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             {[
               { l: "Footer Platform column", h: "/", d: "Report · Feed · Departments · Track · Audit log · Sitemap" },
-              { l: "Portal → Admin console", h: "/portal/mcs", d: "Every department queue links into /admin" },
               { l: "Header avatar menu", h: "/settings?tab=reports", d: "My reports · profile · alerts · privacy" },
               { l: "Reference pages", h: "/sitemap", d: "Route directory · this flow map · /blueprint" },
             ].map((x) => (

@@ -102,7 +102,7 @@ export default function ProfileTab({
       return;
     }
     try {
-      // Canvas-downscaled data URL — survives localStorage like the admin
+      // Canvas-downscaled data URL — persists in the Neon profile document like the admin
       // portrait, instead of a blob: URL that dies with the session.
       const dataUrl = await readDownscaledDataUrl(file, {
         maxSize: 400,

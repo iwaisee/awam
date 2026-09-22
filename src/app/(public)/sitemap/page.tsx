@@ -29,7 +29,7 @@ type Tone = "live" | "demo" | "hybrid";
 
 type RouteEntry = {
   href: string;
-  /** Concrete URL to open when `href` is a dynamic route pattern (e.g. /portal/[dept]). */
+  /** Concrete URL to open when `href` is a dynamic route pattern. */
   exampleHref?: string;
   name: string;
   urdu?: string;
@@ -69,7 +69,7 @@ const PUBLIC_ROUTES: RouteEntry[] = [
     features: [
       "Six agency-tagged hazard categories that pre-select the wizard",
       "Photo-to-Fixed explainer with a hardcoded showcase strip",
-      "Phase-2 waitlist form persisted to sada_city_waitlist",
+      "Phase-2 waitlist form persisted to the Neon waitlist list",
     ],
   },
   {
@@ -95,7 +95,7 @@ const PUBLIC_ROUTES: RouteEntry[] = [
     features: [
       "Deep-link pre-fill from category cards, agency CTAs and city launcher",
       "Canvas-downscaled photo evidence (localStorage-safe data URLs)",
-      "POST /api/reports + sada_my_reports offline cache (max 12)",
+      "POST /api/reports — stored directly in the Neon ledger",
     ],
   },
   {
@@ -125,29 +125,6 @@ const AGENCY_ROUTES: RouteEntry[] = [
       "Average response & resolution-rate stats per agency",
       "Per-card CTA deep-links the wizard: /report?dept={key}",
     ],
-    note: "Directory keys (incl. cantt-board, ctp) don't map 1:1 to the portal slugs below.",
-  },
-  {
-    href: "/portal",
-    name: "Operations Gateway",
-    urdu: "بلدیاتی سروس پورٹل",
-    desc: "Official-access hub linking every agency verification portal, with a hotline and live stat pill per card.",
-    tone: "demo",
-    features: ["“Government & Municipal Access Only” badge", "Six agency cards → /portal/{slug}"],
-  },
-  {
-    href: "/portal/[dept]",
-    exampleHref: "/portal/mcs",
-    name: "Agency Verification Portal",
-    desc: "Per-agency triage queue with zone filtering and case actions — the department-facing console.",
-    tone: "demo",
-    params: ["{dept}"],
-    features: [
-      "Six prerendered slugs: mcs · swmc · gepco · traffic · mcs-roads · dc-office",
-      "Zone filter: Cantonment / City / Villages",
-      "Assign / Resolve / Transfer modals (client state only, not persisted)",
-      "Unknown slug intentionally renders the 404 page",
-    ],
   },
 ];
 
@@ -162,7 +139,7 @@ const CITIZEN_ROUTES: RouteEntry[] = [
       "“View Status Timeline” → /track?id={token}",
       "Contest Fix button (UI only — no handler yet)",
     ],
-    note: "Renders the live SQLite ledger keyed to the signed-in citizen's phone.",
+    note: "Renders the live Neon ledger keyed to the signed-in citizen's phone.",
   },
   {
     href: "/settings",
@@ -173,7 +150,7 @@ const CITIZEN_ROUTES: RouteEntry[] = [
     params: ["?tab="],
     features: [
       "Tabs: reports · profile · alerts · privacy · danger",
-      "Profile persisted to sada_citizen_profile via UserContext",
+      "Profile persisted to the Neon citizen-profile document via UserContext",
       "Every tab is deep-linkable for the header avatar menu",
     ],
   },
@@ -186,8 +163,8 @@ const ADMIN_VIEWS: AdminView[] = [
   { key: "triage", label: "Live Incident Triage", desc: "Ledger-backed queue with validated status transitions — dispatching stamps unit + time onto the report." },
   { key: "field-gateway", label: "Field Dispatch", desc: "KPI dock + two sub-tabs (Work Orders / Squads & Fleet) with smart unit matching; dispatches sync triage & /track." },
   { key: "users", label: "Citizen Management", desc: "Console table of citizens backed by the demo console datasets." },
-  { key: "territories", label: "Territories & Coverage", desc: "City / zone / area coverage editor persisted to sada_coverage_data (CoverageContext)." },
-  { key: "categories", label: "Categories & SLA Rules", desc: "Taxonomy + SLA editor persisted to sada_category_rules." },
+  { key: "territories", label: "Territories & Coverage", desc: "City / zone / area coverage editor persisted to the Neon coverage document (CoverageContext)." },
+  { key: "categories", label: "Categories & SLA Rules", desc: "Taxonomy + SLA editor persisted to the Neon coverage document." },
   { key: "sentinel", label: "Fraud & Spam Sentinel", desc: "Fraud & abuse signal queue — sidebar badge shows open cases." },
   { key: "settings", label: "System Preferences", desc: "Gear-only view (not in the sidebar nav): admin profile + system prefs with factory defaults." },
 ];
@@ -211,13 +188,8 @@ const API_METHODS = [
 ];
 
 const LOCAL_STORES = [
-  { key: "sada_admin_profile", note: "Admin identity on the console — header chip, profile popover, Settings view." },
-  { key: "sada_system_prefs", note: "System Preferences toggles saved from Admin → Settings." },
-  { key: "sada_citizen_profile", note: "Citizen identity & preferences (UserContext); migrates legacy sada_citizen_settings." },
-  { key: "sada_my_reports", note: "Offline cache of the last 12 wizard filings — /track's fallback source." },
-  { key: "sada_city_waitlist", note: "Phase-2 city waitlist signups from the home page." },
-  { key: "sada_coverage_data", note: "Cities / zones / areas behind CoverageContext and the Territories editor." },
-  { key: "sada_category_rules", note: "Category taxonomy & SLA rule overrides." },
+  { key: "sada_auth_session", note: "Signed-in session token (client credential — data itself lives in Neon)." },
+  { key: "sada_detected_city", note: "Sub-24h cache of the landing page's city geodetection." },
 ];
 
 const GAPS = [
@@ -227,15 +199,11 @@ const GAPS = [
   },
   {
     title: "My Reports is demo-only",
-    detail: "It reads the live SQLite ledger; the wizard's sada_my_reports cache is also read by /track's fallback.",
+    detail: "It reads the live Neon ledger — no offline cache exists.",
   },
   {
     title: "Invalid settings tab link",
     detail: "The Citizen Workspace sidebar links /settings?tab=reputation, which is not a valid tab (valid: reports, profile, alerts, privacy, danger) — it silently falls back to profile.",
-  },
-  {
-    title: "Directory ↔ portal mismatch",
-    detail: "/departments lists cantt-board & ctp (no portal slugs), while /portal ships traffic, mcs-roads & dc-office (no directory cards).",
   },
   {
     title: "In-memory upvotes",
@@ -396,7 +364,7 @@ export default function SitemapPage() {
         <nav className="mt-6 flex flex-wrap gap-1.5" aria-label="Sitemap sections">
           {[
             { h: "#public", l: "Citizen Experience" },
-            { h: "#agencies", l: "Agencies & Portals" },
+            { h: "#agencies", l: "Agencies" },
             { h: "#citizen", l: "Citizen Workspace" },
             { h: "#admin", l: "Admin Console" },
             { h: "#plumbing", l: "Data & Storage" },
@@ -430,14 +398,14 @@ export default function SitemapPage() {
         </div>
       </section>
 
-      {/* ------------------------- Agencies & portals ----------------------- */}
+      {/* ------------------------------ Agencies --------------------------- */}
       <section className="mt-12">
         <SectionHead
           id="agencies"
           icon={<Building2 className="h-5 w-5" />}
-          title="Agencies & Portals"
-          urdu="محکمے اور پورٹلز"
-          blurb="The informational agency layer plus department-facing portals (demo queues — client state only)."
+          title="Agencies"
+          urdu="سرکاری محکمے"
+          blurb="The informational agency layer — the who-fixes-what directory with helplines and escalation chains."
           count={AGENCY_ROUTES.length}
         />
         <div className="grid gap-4 md:grid-cols-2">
@@ -513,7 +481,7 @@ export default function SitemapPage() {
               <div className="min-w-0">
                 <h3 className="font-mono text-sm font-bold text-slate-900">/api/reports</h3>
                 <p className="text-[11px] font-medium text-slate-400">
-                  SQLite at data/reports.db · force-dynamic · nodejs runtime
+                  Neon Postgres · force-dynamic · nodejs runtime
                 </p>
               </div>
             </div>
@@ -577,7 +545,7 @@ export default function SitemapPage() {
               Running on demo datasets
             </p>
             <p className="mt-1.5 text-xs leading-5 text-amber-800/80">
-              /feed cards · /settings?tab=reports · portal queues · home showcase · radar,
+              /feed cards · /settings?tab=reports · home showcase · radar,
               sentinel & citizen-management datasets in src/data/operationsData.ts.
             </p>
           </div>

@@ -137,7 +137,7 @@ function SettingsPageInner() {
     setIsSaving(true);
     const snapshot = currentSettings;
     window.setTimeout(() => {
-      updateProfile(snapshot); // UserContext + localStorage — header updates live
+      updateProfile(snapshot); // UserContext + Neon push — header updates live
       setEdits({});
       setIsSaving(false);
       showToast("✓ Your profile has been updated.");

@@ -216,7 +216,7 @@ function TaskCard({
             <span className="font-semibold text-slate-800">
               {ticket.area_name}
             </span>
-            {ticket.uc_number ? `, UC ${ticket.uc_number}` : ""} •{" "}
+            •{" "}
             {ticket.city_name}
             {!ticket.coordinates && (
               <span className="ml-1 text-[10px] text-slate-400">

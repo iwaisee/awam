@@ -3,7 +3,7 @@ import type { IncidentReport, UrgencyLevel } from "@/types/civic";
 
 /* Pure field-console helpers shared by the /squad client components and the
    server-side session store. NOTHING here may import server-only modules
-   (node:sqlite lives behind the squadPortal/reportsDb boundary). */
+   (the Postgres pool lives behind the squadPortal/reportsDb boundary). */
 
 export type SquadAvailability =
   | "active_field"
@@ -78,7 +78,7 @@ export function compareByDispatchPriority(
 ): number {
   const p1 = Number(isP1(b)) - Number(isP1(a));
   if (p1 !== 0) return p1;
-  return a.sla_deadline.localeCompare(b.sla_deadline);
+  return new Date(a.sla_deadline).getTime() - new Date(b.sla_deadline).getTime();
 }
 
 /** True when the report belongs to the squad (assigned_unit match, case-free). */

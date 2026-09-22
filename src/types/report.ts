@@ -24,6 +24,18 @@ export type CategoryId =
 
 export type SeverityLevel = "routine" | "high" | "emergency";
 
+/** Live proof-of-presence telemetry locked by the report wizard's camera
+    flow (LiveReportCapture). The fix is captured fresh at shutter time —
+    never cached, never hand-entered. */
+export interface LiveGeoLock {
+  latitude: number;
+  longitude: number;
+  /** Horizontal accuracy of the GPS fix, ± meters. */
+  accuracyMeters: number;
+  /** Epoch ms when the position was locked. */
+  lockedAt: number;
+}
+
 export interface ReportFormData {
   province: string;
   city: string;
@@ -38,7 +50,13 @@ export interface ReportFormData {
   tags: string[];
   title: string;
   description: string;
+  /** Verified live captures only (gallery uploads are disabled) — exactly one. */
   files: File[];
+  /** GPS fix locked while capturing the evidence photo; null until the
+      live-capture flow completes. */
+  geo: LiveGeoLock | null;
+  /** ISO timestamp of the shutter press that produced files[0]. */
+  capturedAt: string | null;
   severity: SeverityLevel;
   isAnonymous: boolean;
   phoneNumber: string;
@@ -56,6 +74,8 @@ export const emptyReport: ReportFormData = {
   title: "",
   description: "",
   files: [],
+  geo: null,
+  capturedAt: null,
   severity: "routine",
   isAnonymous: false,
   phoneNumber: "",
@@ -180,3 +200,43 @@ export const AVAILABLE_TAGS: string[] = [
   "Market Area",
   "Monsoon Damage",
 ];
+
+/* ------------------------------- Feed cards ------------------------------- */
+
+export type FeedStatus = "action_required" | "in_progress" | "resolved";
+export type FeedSeverity = "normal" | "high" | "emergency";
+
+/** The card shape every report-listing surface renders — the community feed,
+    the settings "My Reports" tab and the citizen workspace. Produced from a
+    live IncidentReport by lib/feedReports.toFeedReport. */
+export interface FeedReport {
+  /** Public tracking token, e.g. "SKT-1042". */
+  id: string;
+  title: string;
+  description: string;
+  /** Nearest anchor shown in the geo strip. */
+  landmark: string;
+  city: string;
+  area: string;
+  category: CategoryId;
+  /** Hashtag chip, e.g. "#OverflowingDumpster". */
+  categoryTag: string;
+  /** Short agency code for the authority pill, e.g. "GEPCO". */
+  agency: string;
+  status: FeedStatus;
+  statusLabel: string;
+  severity: FeedSeverity;
+  upvotes: number;
+  hoursAgo: number;
+  reportedBy: string;
+  gpsVerified: boolean;
+  /** Tailwind gradient stops behind the photo tile. */
+  thumbnailTint: string;
+  imageUrl?: string;
+  /** Full authority name for the dispatch ribbon. */
+  assignedAuthority?: string;
+  assignedSquad?: string;
+  /** Pre-computed SLA countdown, e.g. "3h 12m remaining". */
+  slaLabel?: string;
+  resolvedLabel?: string;
+}

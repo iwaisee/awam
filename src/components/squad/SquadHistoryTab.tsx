@@ -200,20 +200,12 @@ function HistoryCard({
       </div>
 
       {/* Work notes + materials — shown once filed */}
-      {(ticket.resolution_notes || ticket.materials_used) && (
+      {ticket.resolution_notes && (
         <div className="space-y-1.5 rounded-xl bg-slate-50 px-3.5 py-2.5 ring-1 ring-slate-100">
-          {ticket.resolution_notes && (
-            <p className="text-[11px] leading-4 text-slate-600">
-              <span className="font-bold text-slate-700">Work notes: </span>
-              {ticket.resolution_notes}
-            </p>
-          )}
-          {ticket.materials_used && (
-            <p className="text-[11px] leading-4 text-slate-600">
-              <span className="font-bold text-slate-700">Materials: </span>
-              <span className="font-mono">{ticket.materials_used}</span>
-            </p>
-          )}
+          <p className="text-[11px] leading-4 text-slate-600">
+            <span className="font-bold text-slate-700">Work notes: </span>
+            {ticket.resolution_notes}
+          </p>
         </div>
       )}
     </article>

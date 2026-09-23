@@ -15,6 +15,7 @@ import {
   DEFAULT_JURISDICTION,
   JURISDICTION_TYPES,
   normalizeAreaInput,
+  toUrgencyLevel,
   type AreaInput,
   type AreaItem,
   type CategoryRule,
@@ -40,7 +41,7 @@ function normalizeCategory(raw: CategoryRule): CategoryRule | null {
       ? raw.default_agency
       : "MCS",
     sla_hours: Number.isFinite(raw.sla_hours) && raw.sla_hours > 0 ? raw.sla_hours : 24,
-    urgency: raw.urgency ?? "routine",
+    urgency: toUrgencyLevel(raw.urgency),
     status: raw.status === "disabled" ? "disabled" : "active",
     tags: Array.isArray(raw.tags) ? raw.tags : [],
     supported_cities: Array.isArray(raw.supported_cities)

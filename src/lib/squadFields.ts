@@ -153,7 +153,7 @@ export function mapDirectionsUrl(report: IncidentReport): string {
 }
 
 export function urgencyRank(urgency: UrgencyLevel): number {
-  return urgency === "emergency" ? 0 : urgency === "high" ? 1 : 2;
+  return urgency === "emergency" ? 0 : urgency === "urgent" ? 1 : 2;
 }
 
 /** Shift label for the roster badge (matches SQUAD_SHIFTS windows). */

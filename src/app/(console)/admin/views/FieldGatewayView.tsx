@@ -1548,10 +1548,10 @@ function WorkOrderCard({
           className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${URGENCY_PILL[candidate.urgency]}`}
         >
           {candidate.urgency === "routine"
-            ? "Routine"
-            : candidate.urgency === "high"
-              ? "High Urgency"
-              : "Emergency"}
+            ? "Routine • عام مسئلہ"
+            : candidate.urgency === "urgent"
+              ? "Urgent • فوری توجہ"
+              : "Emergency • شدید خطرہ"}
         </span>
         {overdue ? (
           <span className="rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-xs font-bold text-rose-800">
@@ -1679,8 +1679,8 @@ function formatDurationMinutes(minutes: number): string {
 }
 
 const URGENCY_PILL: Record<IncidentReport["urgency"], string> = {
-  emergency: "bg-rose-50 text-rose-800 ring-1 ring-rose-200",
-  high: "bg-amber-50 text-amber-900 ring-1 ring-amber-200",
+  emergency: "bg-rose-50 text-rose-800 ring-1 ring-rose-300",
+  urgent: "bg-amber-50 text-amber-900 ring-1 ring-amber-300",
   routine: "bg-slate-100 text-slate-700 ring-1 ring-slate-200",
 };
 

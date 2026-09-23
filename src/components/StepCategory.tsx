@@ -77,7 +77,7 @@ export default function StepCategory({ formData, updateForm }: StepCategoryProps
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          {visibleCategories.map((category) => {
+          {visibleCategories.map((category, index) => {
             const Icon = categoryIcon(category.icon_name);
             const selected = formData.category === category.id;
             const toggleCategory = () => {
@@ -116,16 +116,17 @@ export default function StepCategory({ formData, updateForm }: StepCategoryProps
                     toggleCategory();
                   }
                 }}
-                className={`cursor-pointer rounded-md border bg-card p-4 text-left transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
+                style={{ animationDelay: `${index * 70}ms` }}
+                className={`animate-card-in cursor-pointer rounded-md border bg-card p-4 text-left transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
                   selected
                     ? "border-emerald-600 bg-emerald-50/40 shadow-sm ring-2 ring-emerald-600/25"
-                    : "border-line hover:border-primary/40 hover:shadow-[0_4px_12px_rgba(0,0,0,0.05)]"
+                    : "border-line hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-[0_8px_20px_rgba(0,0,0,0.08)] active:translate-y-0 active:scale-[0.99]"
                 }`}
               >
                 <div className="flex items-start justify-between">
                   <Icon className="h-6 w-6 text-primary" strokeWidth={2} />
                   {selected && (
-                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-600">
+                    <span className="animate-in flex h-5 w-5 items-center justify-center rounded-full bg-emerald-600">
                       <Check className="h-3.5 w-3.5 text-white" strokeWidth={3} />
                     </span>
                   )}

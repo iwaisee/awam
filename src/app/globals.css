@@ -148,6 +148,81 @@ body {
 /* Feed Work Order slide-over uses pure transform/opacity transitions
    (GPU-accelerated) from WorkOrderDrawer.tsx — no keyframes needed. */
 
+/* ------------------------- Report wizard animations ------------------------ */
+/* Step swap in WizardShell — direction-aware slide. "backwards" (not "both"):
+   a forwards fill would hold the to-state's transform forever, making this
+   wrapper the containing block for any position:fixed descendants (the
+   evidence step's capture UI). The to-state equals the natural style. */
+@keyframes step-in-fwd {
+  from {
+    opacity: 0;
+    transform: translateX(28px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes step-in-back {
+  from {
+    opacity: 0;
+    transform: translateX(-28px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-step-fwd {
+  animation: step-in-fwd 0.32s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+
+.animate-step-back {
+  animation: step-in-back 0.32s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+
+/* Category cards cascade in as a step mounts; delay is set inline per card. */
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-card-in {
+  animation: card-in 0.35s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+
+/* Shutter flash inside the full-screen camera overlay ("forwards" holds the
+   transparent end state; opacity-only, so no containing-block side effects). */
+@keyframes shutter-flash {
+  from {
+    opacity: 0.85;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+.animate-shutter-flash {
+  animation: shutter-flash 0.3s ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-step-fwd,
+  .animate-step-back,
+  .animate-card-in,
+  .animate-shutter-flash {
+    animation: none;
+  }
+}
+
 /* --------------------------- Native select reset --------------------------- */
 /* The browser's stock dropdown arrow renders misaligned inside our padded,
    rounded form selects (macOS/WebKit draws it half-clipped at the edge).

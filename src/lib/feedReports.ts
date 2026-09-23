@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { normalizeUrgency } from "@/config/severity";
 import type { FeedReport } from "@/types/report";
 import type { CategoryId, } from "@/types/report";
 import type { IncidentReport } from "@/types/civic";
@@ -76,12 +77,7 @@ export function toFeedReport(report: IncidentReport, now: number): FeedReport {
       : status === "in_progress"
         ? "In Progress"
         : "Under Triage",
-    severity:
-      report.urgency === "emergency"
-        ? "emergency"
-        : report.urgency === "high"
-          ? "high"
-          : "normal",
+    severity: normalizeUrgency(report.urgency),
     upvotes: report.upvotes,
     hoursAgo,
     reportedBy: report.citizen_name || "Anonymous",

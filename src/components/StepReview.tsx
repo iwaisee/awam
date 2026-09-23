@@ -3,7 +3,7 @@
 import { Eye, EyeOff, MapPin, Tag, AlertTriangle, Send, ShieldCheck } from "lucide-react";
 import { useCoverage } from "@/context/CoverageContext";
 import { resolveLocation, resolveVisibleCategories } from "@/lib/reportSubmit";
-import { SEVERITY_META } from "@/types/report";
+import { SEVERITY_MAP } from "@/config/severity";
 import type { ReportFormData } from "@/types/report";
 
 interface StepReviewProps {
@@ -29,7 +29,7 @@ export default function StepReview({
           (c) => c.id === formData.category
         ) ?? null
       : null;
-  const severity = SEVERITY_META[formData.severity];
+  const severity = SEVERITY_MAP[formData.severity];
 
   const inputClass =
     "w-full rounded-btn border border-line bg-card px-3 py-2.5 text-sm text-ink placeholder:text-ink-muted focus:border-primary focus:outline-none focus:ring-3 focus:ring-primary/15";
@@ -82,10 +82,10 @@ export default function StepReview({
             </span>
           ))}
           <span
-            className={`flex items-center gap-1 rounded-full px-3 py-1 text-xs font-bold ${severity.pillClass}`}
+            className={`flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-bold ${severity.badgeClass}`}
           >
             <AlertTriangle className="h-3 w-3" />
-            {severity.label}
+            {severity.labelEn}
           </span>
         </div>
         {rule && (

@@ -109,8 +109,13 @@ export default function ResolveTaskModal({
         } | null;
         throw new Error(data?.error ?? `HTTP ${response.status}`);
       }
+      const data = (await response.json().catch(() => null)) as {
+        photo_warning?: string;
+      } | null;
       onResolved(
-        `Ticket ${incident.id} resolved and photo proof sent to citizen.`,
+        data?.photo_warning
+          ? `Ticket ${incident.id} resolved — but the proof photo was NOT attached: ${data.photo_warning}`
+          : `Ticket ${incident.id} resolved and photo proof sent to citizen.`,
       );
     } catch (err) {
       setError(

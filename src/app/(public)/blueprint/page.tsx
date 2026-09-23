@@ -37,7 +37,7 @@ CREATE TYPE incident_status AS ENUM
   ('submitted', 'verified', 'work_order_issued', 'dispatched',
    'resolved', 'contested');
 
-CREATE TYPE urgency_level AS ENUM ('routine', 'high', 'emergency_p1');
+CREATE TYPE urgency_level AS ENUM ('routine', 'urgent', 'emergency');
 CREATE TYPE unit_status   AS ENUM ('idle', 'en_route', 'on_site', 'off_duty');
 CREATE TYPE attachment_kind AS ENUM
   ('citizen_initial', 'crew_before', 'crew_after_proof');`;
@@ -49,7 +49,7 @@ CREATE TABLE agencies (
   name_en     TEXT NOT NULL,
   name_ur     TEXT,
   hotline     TEXT,
-  sla_hours   JSONB NOT NULL DEFAULT '{"routine":72,"high":24,"emergency_p1":4}'
+  sla_hours   JSONB NOT NULL DEFAULT '{"routine":72,"urgent":24,"emergency":4}'
 );
 
 CREATE TABLE categories (

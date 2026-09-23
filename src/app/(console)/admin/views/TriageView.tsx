@@ -27,6 +27,7 @@ import {
   Zap,
 } from "lucide-react";
 import type { RadarSeverity } from "@/data/operationsData";
+import { slaState, type SlaHealth } from "@/config/severity";
 import {
   useLiveReports,
   type TriageIncident,
@@ -42,18 +43,26 @@ import {
 /* --------------------------------- Types ----------------------------------- */
 
 const SEVERITY_PILLS: Record<RadarSeverity, { label: string; cls: string }> = {
-  emergency: { label: "Emergency", cls: "bg-rose-100 text-rose-700 ring-rose-200" },
-  high: { label: "High Priority", cls: "bg-amber-100 text-amber-800 ring-amber-200" },
-  medium: { label: "Medium", cls: "bg-sky-100 text-sky-700 ring-sky-200" },
+  emergency: { label: "Emergency • شدید خطرہ", cls: "bg-rose-50 text-rose-700 ring-rose-300" },
+  urgent: { label: "Urgent • فوری توجہ", cls: "bg-amber-50 text-amber-900 ring-amber-300" },
+  routine: { label: "Routine • عام مسئلہ", cls: "bg-slate-100 text-slate-700 ring-slate-200" },
   contested: { label: "Fix Contested", cls: "bg-purple-100 text-purple-700 ring-purple-200" },
 };
 
 const SEVERITY_RANK: Record<RadarSeverity, number> = {
   emergency: 4,
-  high: 3,
-  medium: 2,
+  urgent: 3,
+  routine: 2,
   contested: 1,
 };
+
+/** SLA health off the real ledger clock: stored sla_deadline first, tier
+    window from config/severity as fallback. Contested fixes carry no SLA. */
+function slaHealthOf(row: TriageIncident): SlaHealth | null {
+  return row.severity === "contested"
+    ? null
+    : slaState(row.createdAt, row.severity, row.slaDeadline);
+}
 
 const STATUS_TONES: Record<TriageTone, string> = {
   amber: "bg-amber-50 text-amber-700 ring-amber-200",
@@ -266,14 +275,14 @@ export default function TriageView() {
         color: "#DC2626",
       },
       {
-        name: "High Priority",
-        value: live.filter((r) => r.severity === "high").length,
+        name: "Urgent",
+        value: live.filter((r) => r.severity === "urgent").length,
         color: "#F59E0B",
       },
       {
-        name: "Medium",
-        value: live.filter((r) => r.severity === "medium").length,
-        color: "#0EA5E9",
+        name: "Routine",
+        value: live.filter((r) => r.severity === "routine").length,
+        color: "#64748B",
       },
     ],
     [live],
@@ -345,7 +354,7 @@ export default function TriageView() {
       )
         return false;
       if (segment === "emergency" && row.severity !== "emergency") return false;
-      if (segment === "breached" && hoursOf(row.elapsed) < 24) return false;
+      if (segment === "breached" && slaHealthOf(row) !== "breached") return false;
       if (segment === "disputed" && row.rawStatus !== "disputed") return false;
       if (segment === "resolved" && row.rawStatus !== "resolved") return false;
       if (agency !== "All Agencies" && row.agency !== agency) return false;
@@ -580,10 +589,10 @@ export default function TriageView() {
                 label: "Severity",
                 options: [
                   "All Severities",
-                  "Emergency",
-                  "High Priority",
-                  "Medium",
-                  "Fix Contested",
+                  SEVERITY_PILLS.emergency.label,
+                  SEVERITY_PILLS.urgent.label,
+                  SEVERITY_PILLS.routine.label,
+                  SEVERITY_PILLS.contested.label,
                 ],
               },
               {
@@ -690,7 +699,9 @@ export default function TriageView() {
                 {paginatedRows.map((row) => {
                   const sev = SEVERITY_PILLS[row.severity];
                   const hours = hoursOf(row.elapsed);
-                  const breached = hours >= 24;
+                  const health = slaHealthOf(row);
+                  const breached = health === "breached";
+                  const dueSoon = health === "due-soon";
                   return (
                     <tr
                       key={row.id}
@@ -749,20 +760,33 @@ export default function TriageView() {
                       <td className="px-3 py-4">
                         <p
                           className={`whitespace-nowrap font-mono text-sm font-bold tabular-nums ${
-                            breached ? "text-rose-600" : "text-slate-800"
+                            breached
+                              ? "text-rose-600"
+                              : dueSoon
+                                ? "text-amber-600"
+                                : "text-slate-800"
                           }`}
                         >
                           {row.elapsed}
                         </p>
                         <p
                           className={`mt-0.5 flex items-center gap-1 whitespace-nowrap text-[10px] font-bold ${
-                            breached ? "text-rose-600" : "text-slate-400"
+                            breached
+                              ? "text-rose-600"
+                              : dueSoon
+                                ? "text-amber-600"
+                                : "text-slate-400"
                           }`}
                         >
                           {breached ? (
                             <>
                               <AlertTriangle className="h-3 w-3" />
                               SLA breached
+                            </>
+                          ) : dueSoon ? (
+                            <>
+                              <Clock className="h-3 w-3" />
+                              SLA due soon
                             </>
                           ) : (
                             <>

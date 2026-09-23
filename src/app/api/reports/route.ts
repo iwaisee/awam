@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
+import { toUrgencyLevel } from "@/types/civic";
 import {
   cityCode,
   DEFAULT_JURISDICTION,
@@ -17,7 +19,7 @@ import {
   ticketTokenExists,
 } from "@/lib/reportsDb";
 import { pickSquadForReport } from "@/lib/dispatchAssign";
-import { uploadReportImage } from "@/lib/cloudinary";
+import { isCloudinaryConfigured, uploadReportImage } from "@/lib/cloudinary";
 
 /* Neon (Postgres) report ledger. The `reports` table starts EMPTY — every
    row comes from a real submission through the citizen wizard or this API.
@@ -28,6 +30,33 @@ import { uploadReportImage } from "@/lib/cloudinary";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+
+/* Evidence-photo policy. Live camera output varies by phone sensor, so a
+   data URL is never silently dropped if it can be helped:
+   - up to MAX_UPLOAD_CHARS → always try Cloudinary first (it resizes the
+     image server-side, so even raw multi-MB captures become compact URLs);
+   - cloud unavailable or upload failed → keep the data URL inline only if
+     it fits MAX_INLINE_CHARS (the row must not bloat with base64 blobs);
+   - neither works → file the report WITHOUT the photo, but tell the
+     citizen through `photo_warning` instead of losing evidence quietly. */
+const MAX_UPLOAD_CHARS = 25_000_000;
+const MAX_INLINE_CHARS = 2_000_000;
+const PHOTO_TOO_LARGE_WARNING =
+  "The photo was too large to attach — your report was filed without it.";
+
+async function persistEvidencePhoto(
+  raw: unknown,
+  kind: "report" | "resolution",
+): Promise<{ url?: string; warning?: string }> {
+  if (typeof raw !== "string" || !raw.startsWith("data:image/")) return {};
+  if (raw.length > MAX_UPLOAD_CHARS) return { warning: PHOTO_TOO_LARGE_WARNING };
+  if (isCloudinaryConfigured()) {
+    const url = await uploadReportImage(raw, kind);
+    if (url) return { url };
+  }
+  if (raw.length <= MAX_INLINE_CHARS) return { url: raw };
+  return { warning: PHOTO_TOO_LARGE_WARNING };
+}
 
 export async function GET() {
   return NextResponse.json(await listReports());
@@ -41,7 +70,10 @@ const INCIDENT_STATUSES: IncidentStatus[] = [
   "disputed",
 ];
 
-const URGENCIES: UrgencyLevel[] = ["routine", "high", "emergency"];
+/* Canonical severity taxonomy (config/severity). Old clients may still POST
+   "high" — the zod schema is the gate, then the value normalizes to
+   "urgent" before it touches the ledger. */
+const severitySchema = z.enum(["routine", "urgent", "emergency", "high"]);
 
 /** Mint a unique regional ticket token, e.g. "SKT-4912". Retries with a wider
     number range if a random pick ever collides with an existing token. */
@@ -106,8 +138,8 @@ export async function PATCH(request: Request) {
       typeof body.assigned_agency === "string" && body.assigned_agency.trim()
         ? body.assigned_agency.trim().slice(0, 120)
         : undefined;
-    const urgency = URGENCIES.includes(body.urgency as UrgencyLevel)
-      ? (body.urgency as UrgencyLevel)
+    const urgency = severitySchema.safeParse(body.urgency).success
+      ? toUrgencyLevel(body.urgency)
       : undefined;
 
     const patch: Parameters<typeof patchReport>[1] = {};
@@ -118,18 +150,9 @@ export async function PATCH(request: Request) {
     if (body.upvote === true) patch.upvote = true;
 
     // Squad resolution proof — only meaningful on a resolved ticket. The
-    // after-photo is pushed to Cloudinary (the row keeps just the URL);
-    // without cloud credentials it stays inline (the ledger is the bucket).
-    const afterPhoto =
-      typeof body.after_photo_url === "string" &&
-      body.after_photo_url.startsWith("data:image/") &&
-      body.after_photo_url.length < 2_000_000
-        ? body.after_photo_url
-        : undefined;
-    if (afterPhoto) {
-      patch.after_photo_url =
-        (await uploadReportImage(afterPhoto, "resolution")) ?? afterPhoto;
-    }
+    // after-photo follows the shared evidence-photo policy (see above).
+    const afterPhoto = await persistEvidencePhoto(body.after_photo_url, "resolution");
+    if (afterPhoto.url) patch.after_photo_url = afterPhoto.url;
     if (typeof body.resolution_notes === "string" && body.resolution_notes.trim())
       patch.resolution_notes = body.resolution_notes.trim().slice(0, 2000);
 
@@ -157,7 +180,11 @@ export async function PATCH(request: Request) {
       );
     }
 
-    return NextResponse.json({ success: true, report: updated });
+    return NextResponse.json({
+      success: true,
+      report: updated,
+      ...(afterPhoto.warning ? { photo_warning: afterPhoto.warning } : {}),
+    });
   } catch (error) {
     return NextResponse.json(
       {
@@ -245,9 +272,11 @@ export async function POST(request: Request) {
       Math.max(1, Math.round(Number(body.sla_hours) || 24)),
     );
     const cityName = asString(body.city_name);
-    const urgency = URGENCIES.includes(body.urgency as UrgencyLevel)
-      ? (body.urgency as UrgencyLevel)
-      : "routine";
+    const urgency = toUrgencyLevel(
+      severitySchema.safeParse(body.urgency).success
+        ? body.urgency
+        : undefined,
+    );
     const jurisdiction = JURISDICTION_TYPES.includes(
       body.jurisdiction as JurisdictionType,
     )
@@ -265,6 +294,9 @@ export async function POST(request: Request) {
 
     const token = await mintToken(asString(body.city_id), cityName);
     const ticket = `#${token}`;
+
+    // Citizen evidence photo, subject to the shared evidence-photo policy.
+    const photo = await persistEvidencePhoto(body.photo_url, "report");
 
     const report: IncidentReport = {
       id: ticket,
@@ -284,14 +316,9 @@ export async function POST(request: Request) {
       description: asString(body.description).slice(0, 2000),
       // Citizen headline from wizard step 3; optional so older clients pass.
       title: asString(body.title).slice(0, 140) || undefined,
-      // Submitted photo(s) arrive downscaled as data URLs from the wizard
-      // and are pushed to Cloudinary so the row stores a CDN URL.
-      photo_url:
-        typeof body.photo_url === "string" &&
-        body.photo_url.startsWith("data:image/") &&
-        body.photo_url.length < 2_000_000
-          ? (await uploadReportImage(body.photo_url, "report")) ?? body.photo_url
-          : undefined,
+      // Submitted photo arrives as a data URL from the wizard; the
+      // evidence-photo policy decides CDN URL vs inline vs warning.
+      photo_url: photo.url,
       selected_tags,
       coordinates:
         body.coordinates &&
@@ -324,7 +351,12 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json(
-      { success: true, ticket_id: report.id, report: stored },
+      {
+        success: true,
+        ticket_id: report.id,
+        report: stored,
+        ...(photo.warning ? { photo_warning: photo.warning } : {}),
+      },
       { status: 201 },
     );
   } catch (error) {

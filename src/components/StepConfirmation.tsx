@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { CheckCircle2, RotateCcw, ClipboardList, Timer, MessageCircle } from "lucide-react";
-import { SEVERITY_META } from "@/types/report";
+import { SEVERITY_MAP } from "@/config/severity";
 import type { ReportFormData } from "@/types/report";
 import type { IncidentReport } from "@/types/civic";
 
@@ -10,6 +10,9 @@ interface StepConfirmationProps {
   referenceId: string;
   formData: ReportFormData;
   report: IncidentReport | null;
+  /** Set by the server when the evidence photo could not be attached —
+      the ticket still exists, but the citizen must know it went in bare. */
+  photoWarning?: string | null;
   onNewReport: () => void;
   onTrack: () => void;
 }
@@ -61,10 +64,11 @@ export default function StepConfirmation({
   referenceId,
   formData,
   report,
+  photoWarning,
   onNewReport,
   onTrack,
 }: StepConfirmationProps) {
-  const severity = SEVERITY_META[formData.severity];
+  const severity = SEVERITY_MAP[formData.severity];
   const whatsappHref = useMemo(() => {
     const base =
       typeof window === "undefined" ? "https://sada-e-awam.pk" : window.location.origin;
@@ -99,11 +103,24 @@ export default function StepConfirmation({
         )}
       </div>
 
+      {photoWarning && (
+        <div className="mt-4 w-full rounded-md border border-amber-300/80 bg-amber-50 px-4 py-3 text-left">
+          <p className="text-[13px] font-semibold leading-5 text-amber-900">
+            {photoWarning}
+          </p>
+          <p className="mt-0.5 text-[11px] leading-4 text-amber-800">
+            Your ticket is valid — but strong evidence helps agencies act
+            faster. If the issue persists, you can file again with a smaller
+            photo.
+          </p>
+        </div>
+      )}
+
       {report?.sla_deadline && <SlaCountdown deadline={report.sla_deadline} />}
 
       <p className="mt-4 max-w-sm text-sm leading-6 text-ink-soft">
         Thank you for raising your voice. Your{" "}
-        <span className="font-semibold text-ink">{severity.label.toLowerCase()}</span>{" "}
+        <span className="font-semibold text-ink">{severity.labelEn.toLowerCase()}</span>{" "}
         report regarding <span className="font-semibold text-ink">{formData.area}</span>,{" "}
         {formData.city} has been forwarded to{" "}
         <span className="font-semibold text-ink">

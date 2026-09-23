@@ -18,6 +18,7 @@ import {
   User,
   Wrench,
 } from "lucide-react";
+import { SEVERITY_MAP } from "@/config/severity";
 import type { IncidentReport } from "@/types/civic";
 import {
   isP1,
@@ -167,15 +168,19 @@ function TaskCard({
           : "border-slate-200/90 hover:border-slate-300"
       } ${busy ? "opacity-60" : ""}`}
     >
-      {/* Card header: priority badge + real SLA countdown */}
+      {/* Card header: canonical priority banner + real SLA countdown */}
       <div className="flex flex-wrap items-center gap-2">
         {p1 ? (
-          <span className="rounded-full bg-rose-600 px-2.5 py-0.5 text-[10px] font-black text-white">
-            ⚡ P1 LIFE EMERGENCY
+          <span className="w-full animate-pulse rounded-xl bg-rose-600 px-3 py-1.5 text-center text-[11px] font-black tracking-wide text-white">
+            ⚡ P1 EMERGENCY • شدید خطرہ (Immediate Life Hazard)
+          </span>
+        ) : ticket.urgency === "urgent" ? (
+          <span className="rounded-full bg-amber-50 px-2.5 py-0.5 text-[10px] font-bold text-amber-900 ring-1 ring-amber-300">
+            ● URGENT • فوری توجہ (SLA: {SEVERITY_MAP.urgent.slaDisplay})
           </span>
         ) : (
-          <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[10px] font-bold text-slate-700">
-            ● Routine Service
+          <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[10px] font-bold text-slate-700 ring-1 ring-slate-200">
+            ○ ROUTINE • عام مسئلہ (SLA: {SEVERITY_MAP.routine.slaDisplay})
           </span>
         )}
         <span

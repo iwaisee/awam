@@ -188,7 +188,7 @@ export default function SquadHeader({
           <div className="rounded-2xl border border-rose-200/70 bg-rose-50/50 px-3 py-3">
             <p className="flex items-center gap-1 text-[9px] font-bold tracking-wider text-rose-700 uppercase">
               <AlertTriangle className="h-3 w-3 shrink-0" />
-              P1 Critical
+              Emergencies (شدید خطرہ)
             </p>
             <p
               className={`mt-1 font-mono text-2xl font-black text-rose-700 ${kpis.criticalCount > 0 ? "animate-pulse" : ""}`}

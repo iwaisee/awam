@@ -60,7 +60,7 @@ const EMPTY_FORM: CatFormState = {
 
 const URGENCY_PILLS: Record<UrgencyLevel, string> = {
   emergency: "bg-rose-100 text-rose-700",
-  high: "bg-amber-100 text-amber-800",
+  urgent: "bg-amber-100 text-amber-800",
   routine: "bg-slate-100 text-slate-600",
 };
 
@@ -566,7 +566,7 @@ export default function CategoriesView() {
                       aria-label="Urgency level"
                       className="flex rounded-xl bg-slate-100 p-1"
                     >
-                      {(["routine", "high", "emergency"] as UrgencyLevel[]).map(
+                      {(["routine", "urgent", "emergency"] as UrgencyLevel[]).map(
                         (u) => (
                           <button
                             key={u}

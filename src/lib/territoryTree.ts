@@ -190,7 +190,7 @@ export function buildTerritoryTree(
       live = {
         open: live.open + 1,
         p1: live.p1 + (report.urgency === "emergency" ? 1 : 0),
-        p2: live.p2 + (report.urgency === "high" ? 1 : 0),
+        p2: live.p2 + (report.urgency === "urgent" ? 1 : 0),
         p3: live.p3 + (report.urgency === "routine" ? 1 : 0),
         resolved: live.resolved,
       };

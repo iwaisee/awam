@@ -1,3 +1,6 @@
+import type { SeverityLevel } from "@/config/severity";
+import { normalizeUrgency } from "@/config/severity";
+
 /* Shared civic schemas + the cascading rule engine consumed by the citizen
    reporting wizard, the admin taxonomy panels, and the /api/reports backend. */
 
@@ -9,7 +12,13 @@ export type JurisdictionType =
   | "Development Authority"
   | "Private Housing";
 
-export type UrgencyLevel = "routine" | "high" | "emergency";
+/** Category urgency uses the canonical severity tiers (config/severity). */
+export type UrgencyLevel = SeverityLevel;
+
+/** Coerce a legacy/stored urgency value ("high" → "urgent", junk → "routine"). */
+export function toUrgencyLevel(raw: unknown): UrgencyLevel {
+  return normalizeUrgency(raw);
+}
 
 /** Dispatch desks operating in the Phase-1 pilot district (Sialkot). */
 export type AgencyName =

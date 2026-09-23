@@ -2,10 +2,7 @@
 
 import { X } from "lucide-react";
 import LiveReportCapture from "@/components/report/LiveReportCapture";
-import {
-  AVAILABLE_TAGS,
-  SEVERITY_META,
-} from "@/types/report";
+import { SEVERITY_MAP } from "@/config/severity";
 import type { ReportFormData } from "@/types/report";
 
 interface StepEvidenceProps {
@@ -14,13 +11,6 @@ interface StepEvidenceProps {
 }
 
 export default function StepEvidence({ formData, updateForm }: StepEvidenceProps) {
-  const toggleTag = (tag: string) => {
-    const tags = formData.tags.includes(tag)
-      ? formData.tags.filter((t) => t !== tag)
-      : [...formData.tags, tag];
-    updateForm({ tags });
-  };
-
   const inputClass =
     "w-full rounded-btn border border-line bg-card px-3 py-2.5 text-sm text-ink placeholder:text-ink-muted focus:border-primary focus:outline-none focus:ring-3 focus:ring-primary/15";
 
@@ -104,8 +94,15 @@ export default function StepEvidence({ formData, updateForm }: StepEvidenceProps
         <p className="mb-2 text-sm font-bold text-ink">
           Severity <span className="urdu text-ink-soft font-normal">شدت</span>
         </p>
-        <div className="grid grid-cols-3 gap-2">
-          {Object.values(SEVERITY_META).map((severity) => {
+        {/* Segmented severity tabs — canonical taxonomy from config/severity.
+            Tint fills carry the urgency color; segments stay single-line down
+            to 320px screens. */}
+        <div
+          role="group"
+          aria-label="Severity شدت"
+          className="grid grid-cols-3 gap-1 rounded-btn bg-canvas p-1"
+        >
+          {Object.values(SEVERITY_MAP).map((severity) => {
             const selected = formData.severity === severity.id;
             return (
               <button
@@ -113,53 +110,42 @@ export default function StepEvidence({ formData, updateForm }: StepEvidenceProps
                 type="button"
                 onClick={() => updateForm({ severity: severity.id })}
                 aria-pressed={selected}
-                className={`rounded-btn border px-3 py-2.5 text-center transition-colors ${
+                className={`rounded-btn px-1 py-2 text-center transition-all duration-150 ${
                   selected
-                    ? "border-primary bg-primary-tint"
-                    : "border-line bg-card hover:border-primary/40"
+                    ? `${severity.badgeClass} shadow-xs`
+                    : "text-ink-soft hover:bg-white/70"
                 }`}
               >
-                <span
-                  className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-bold ${severity.pillClass}`}
-                >
-                  {severity.label}
+                <span className="block text-xs font-bold leading-tight">
+                  {severity.labelEn}
                 </span>
-                <span className="urdu mt-1 block text-xs text-ink-soft">
-                  {severity.urdu}
+                <span className="urdu mt-0.5 block text-[11px] leading-none opacity-80">
+                  {severity.labelUr}
                 </span>
               </button>
             );
           })}
         </div>
-        <p className="mt-1.5 text-xs text-ink-soft">
-          {SEVERITY_META[formData.severity].description}
-        </p>
-      </div>
-
-      <div>
-        <p className="mb-2 text-sm font-bold text-ink">
-          Tags <span className="urdu text-ink-soft font-normal">ٹیگز</span>
-        </p>
-        <div className="flex flex-wrap gap-2">
-          {AVAILABLE_TAGS.map((tag) => {
-            const selected = formData.tags.includes(tag);
-            return (
-              <button
-                key={tag}
-                type="button"
-                onClick={() => toggleTag(tag)}
-                aria-pressed={selected}
-                className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${
-                  selected
-                    ? "border-primary bg-primary text-white"
-                    : "border-line bg-card text-ink-soft hover:border-primary/40"
-                }`}
+        {/* Bilingual helper text + SLA promise, synced to the selection. */}
+        {(() => {
+          const severity = SEVERITY_MAP[formData.severity];
+          return (
+            <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span
+                className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-bold ${severity.badgeClass}`}
               >
-                {tag}
-              </button>
-            );
-          })}
-        </div>
+                <span className={`h-1.5 w-1.5 rounded-full ${severity.dotClass}`} />
+                SLA:
+                {/* Urdu in its own isolated span so the RTL digits keep their order */}
+                <span className="urdu font-bold">{severity.slaDisplayUr}</span>
+              </span>
+              <p className="text-xs leading-5 text-ink-soft">
+                {severity.descriptionEn}
+                <span className="urdu text-ink-soft"> — {severity.descriptionUr}</span>
+              </p>
+            </div>
+          );
+        })()}
       </div>
 
       <div>

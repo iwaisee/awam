@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { normalizeUrgency } from "@/config/severity";
 import type { IncidentReport } from "@/types/civic";
 import type { RadarIncident, RadarSeverity } from "@/data/operationsData";
 
@@ -30,7 +31,7 @@ const STATUS_PRESENTATION: Record<string, { label: string; tone: TriageTone }> =
 };
 
 const severityOf = (urgency: IncidentReport["urgency"]): RadarSeverity =>
-  urgency === "emergency" ? "emergency" : urgency === "high" ? "high" : "medium";
+  normalizeUrgency(urgency);
 
 function elapsedSince(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();

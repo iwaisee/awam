@@ -22,8 +22,9 @@ function createPool(): Pool {
   return new Pool({
     connectionString: url,
     max: 5,
-    // Neon endpoints require TLS; local Postgres does not.
-    ...(isLocal ? {} : { ssl: { rejectUnauthorized: false } }),
+    // Neon endpoints require TLS with full certificate verification; local
+    // Postgres does not.
+    ...(isLocal ? {} : { ssl: true }),
   });
 }
 
@@ -70,7 +71,7 @@ CREATE TABLE IF NOT EXISTS reports (
   -- What the hazard is
   category_id TEXT NOT NULL,
   category_title TEXT NOT NULL,
-  urgency TEXT NOT NULL CHECK (urgency IN ('routine', 'high', 'emergency')),
+  urgency TEXT NOT NULL CHECK (urgency IN ('routine', 'urgent', 'emergency')),
   selected_tags TEXT[] NOT NULL DEFAULT '{}',
   description TEXT NOT NULL,
   title TEXT NOT NULL DEFAULT '',
@@ -189,11 +190,20 @@ BEGIN
     ALTER TABLE reports ADD CONSTRAINT reports_status_check
       CHECK (status IN ('triage', 'dispatched', 'in_progress', 'resolved', 'disputed'));
   END IF;
+  -- Canonical severity taxonomy: fold legacy "high" rows into "urgent",
+  -- then make sure the check constraint matches the canonical tiers.
+  UPDATE reports SET urgency = 'urgent' WHERE urgency = 'high';
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'reports_urgency_check'
+      AND pg_get_constraintdef(oid) NOT LIKE '%''urgent''%'
+  ) THEN
+    ALTER TABLE reports DROP CONSTRAINT reports_urgency_check;
+  END IF;
   IF NOT EXISTS (
     SELECT 1 FROM pg_constraint WHERE conname = 'reports_urgency_check'
   ) THEN
     ALTER TABLE reports ADD CONSTRAINT reports_urgency_check
-      CHECK (urgency IN ('routine', 'high', 'emergency'));
+      CHECK (urgency IN ('routine', 'urgent', 'emergency'));
   END IF;
   IF NOT EXISTS (
     SELECT 1 FROM pg_constraint WHERE conname = 'reports_upvotes_check'

@@ -69,6 +69,8 @@ export default function WizardShell({
   initialCity?: string | null;
 }) {
   const [step, setStep] = useState(0);
+  // Slide direction for the step-swap animation (forward = deeper into flow).
+  const [direction, setDirection] = useState<"forward" | "back">("forward");
   const router = useRouter();
   const { getReportableAreas, cities, categories, hydrated: coverageLoaded } = useCoverage();
   const [formData, setFormData] = useState<ReportFormData>(() => ({
@@ -92,6 +94,7 @@ export default function WizardShell({
   }, [coverageLoaded]);
   const [referenceId, setReferenceId] = useState("");
   const [submittedReport, setSubmittedReport] = useState<IncidentReport | null>(null);
+  const [photoWarning, setPhotoWarning] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -107,12 +110,19 @@ export default function WizardShell({
     }));
   };
 
-  const nextStep = () => setStep((s) => Math.min(s + 1, TOTAL_STEPS));
-  const prevStep = () => setStep((s) => Math.max(s - 1, 0));
+  const nextStep = () => {
+    setDirection("forward");
+    setStep((s) => Math.min(s + 1, TOTAL_STEPS));
+  };
+  const prevStep = () => {
+    setDirection("back");
+    setStep((s) => Math.max(s - 1, 0));
+  };
   const goToStep = (target: number) => {
     if (target < 0 || target > TOTAL_STEPS) return;
     // Only allow jumping to steps already completed in this session.
     if (target > step && !isStepReachable(target)) return;
+    setDirection(target >= step ? "forward" : "back");
     setStep(target);
   };
 
@@ -177,12 +187,15 @@ export default function WizardShell({
         ticket_id?: string;
         report?: IncidentReport;
         error?: string;
+        photo_warning?: string;
       };
       if (!response.ok || !data.success || !data.ticket_id || !data.report) {
         throw new Error(data.error ?? `Server error (${response.status})`);
       }
       setReferenceId(data.ticket_id);
       setSubmittedReport(data.report);
+      setPhotoWarning(data.photo_warning ?? null);
+      setDirection("forward");
       setStep(TOTAL_STEPS);
     } catch (error) {
       setSubmitError(
@@ -199,7 +212,9 @@ export default function WizardShell({
     setFormData(emptyReport);
     setReferenceId("");
     setSubmittedReport(null);
+    setPhotoWarning(null);
     setSubmitError(null);
+    setDirection("back");
     setStep(0);
   };
 
@@ -248,15 +263,29 @@ export default function WizardShell({
                   const current = index === step;
                   const reachable = isStepReachable(index);
                   return (
-                    <li key={s.label} className="flex flex-1 items-start last:flex-none">
+                    // Every cell is equal width and centers its icon, so the
+                    // dots stay evenly spaced even though only the active
+                    // button grows to fit its labels.
+                    <li key={s.label} className="relative flex flex-1 flex-col items-center">
+                      {index < STEPS.length - 1 && (
+                        <span
+                          aria-hidden
+                          className={`absolute top-[1.125rem] left-[calc(50%+1.5rem)] h-0.5 w-[calc(100%-3rem)] transition-colors duration-500 ${
+                            index < step ? "bg-primary" : "bg-line"
+                          }`}
+                        />
+                      )}
                       <button
                         type="button"
                         onClick={() => goToStep(index)}
                         disabled={!reachable}
-                        className="group flex w-20 flex-col items-center gap-1.5 disabled:cursor-default sm:w-24"
+                        aria-label={`${s.label} — ${s.urdu}`}
+                        className={`group flex flex-col items-center gap-1.5 disabled:cursor-default ${
+                          current ? "w-20 sm:w-24" : "w-10 sm:w-24"
+                        }`}
                       >
                         <span
-                          className={`flex h-9 w-9 items-center justify-center rounded-full border-2 transition-colors ${
+                          className={`flex h-9 w-9 items-center justify-center rounded-full border-2 transition-all duration-300 ${
                             completed
                               ? "border-primary bg-primary text-white"
                               : current
@@ -269,22 +298,18 @@ export default function WizardShell({
                         <span
                           className={`text-center text-[11px] font-bold leading-tight sm:text-xs ${
                             completed || current ? "text-primary" : "text-ink-muted"
-                          }`}
+                          } ${current ? "animate-fade-rise" : "hidden sm:block"}`}
                         >
                           {s.label}
                         </span>
-                        <span className="urdu -mt-0.5 text-[11px] leading-none text-ink-soft">
+                        <span
+                          className={`urdu -mt-0.5 text-[11px] leading-none text-ink-soft ${
+                            current ? "animate-fade-rise" : "hidden sm:block"
+                          }`}
+                        >
                           {s.urdu}
                         </span>
                       </button>
-                      {index < STEPS.length - 1 && (
-                        <span
-                          aria-hidden
-                          className={`mt-[1.125rem] h-0.5 flex-1 ${
-                            index < step ? "bg-primary" : "bg-line"
-                          }`}
-                        />
-                      )}
                     </li>
                   );
                 })}
@@ -292,27 +317,35 @@ export default function WizardShell({
             </nav>
           )}
 
-          {step === 0 && <StepLocation formData={formData} updateForm={updateForm} />}
-          {step === 1 && <StepCategory formData={formData} updateForm={updateForm} />}
-          {step === 2 && <StepEvidence formData={formData} updateForm={updateForm} />}
-          {step === 3 && (
-            <StepReview
-              formData={formData}
-              updateForm={updateForm}
-              onSubmit={handleSubmit}
-              submitting={submitting}
-              submitError={submitError}
-            />
-          )}
-          {step === TOTAL_STEPS && (
-            <StepConfirmation
-              referenceId={referenceId}
-              formData={formData}
-              report={submittedReport}
-              onNewReport={handleNewReport}
-              onTrack={() => router.push(`/track?id=${encodeURIComponent(referenceId)}`)}
-            />
-          )}
+          {/* key={step} remounts the panel on every move so the slide-in
+              animation replays; direction picks which edge it enters from. */}
+          <div
+            key={step}
+            className={direction === "forward" ? "animate-step-fwd" : "animate-step-back"}
+          >
+            {step === 0 && <StepLocation formData={formData} updateForm={updateForm} />}
+            {step === 1 && <StepCategory formData={formData} updateForm={updateForm} />}
+            {step === 2 && <StepEvidence formData={formData} updateForm={updateForm} />}
+            {step === 3 && (
+              <StepReview
+                formData={formData}
+                updateForm={updateForm}
+                onSubmit={handleSubmit}
+                submitting={submitting}
+                submitError={submitError}
+              />
+            )}
+            {step === TOTAL_STEPS && (
+              <StepConfirmation
+                referenceId={referenceId}
+                formData={formData}
+                report={submittedReport}
+                photoWarning={photoWarning}
+                onNewReport={handleNewReport}
+                onTrack={() => router.push(`/track?id=${encodeURIComponent(referenceId)}`)}
+              />
+            )}
+          </div>
 
           {step < TOTAL_STEPS && (
             <div className="mt-8 flex items-center justify-between border-t border-line pt-5">
@@ -320,9 +353,9 @@ export default function WizardShell({
                 type="button"
                 onClick={prevStep}
                 disabled={step === 0}
-                className="flex items-center gap-1.5 rounded-btn border-2 border-primary px-4 py-2.5 text-sm font-bold text-primary hover:bg-primary-tint disabled:border-line disabled:text-ink-muted disabled:hover:bg-transparent"
+                className="group flex items-center gap-1.5 rounded-btn border-2 border-line bg-card px-4 py-2.5 text-sm font-bold text-ink-soft transition-all duration-200 enabled:hover:-translate-y-0.5 enabled:hover:border-primary enabled:hover:text-primary enabled:active:translate-y-0 enabled:active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:border-line disabled:text-ink-muted"
               >
-                <ChevronLeft className="h-4 w-4" />
+                <ChevronLeft className="h-4 w-4 transition-transform duration-200 group-enabled:group-hover:-translate-x-0.5" />
                 Back
               </button>
               {step < TOTAL_STEPS - 1 && (
@@ -330,10 +363,15 @@ export default function WizardShell({
                   type="button"
                   onClick={nextStep}
                   disabled={!canContinue}
-                  className="flex items-center gap-1.5 rounded-btn bg-primary px-5 py-2.5 text-sm font-bold text-white hover:bg-primary-dark disabled:border disabled:border-line disabled:bg-line disabled:text-ink-muted disabled:hover:bg-line"
+                  className="group relative flex items-center gap-1.5 overflow-hidden rounded-btn bg-primary px-6 py-2.5 text-sm font-bold text-white shadow-[0_4px_14px_rgba(15,81,50,0.3)] transition-all duration-200 enabled:hover:-translate-y-0.5 enabled:hover:bg-primary-dark enabled:hover:shadow-[0_7px_18px_rgba(15,81,50,0.4)] enabled:active:translate-y-0 enabled:active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-line disabled:text-ink-muted disabled:shadow-none"
                 >
-                  Continue
-                  <ChevronRight className="h-4 w-4" />
+                  {/* Sheen sweep on hover — hidden while disabled */}
+                  <span
+                    aria-hidden
+                    className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/30 to-transparent transition-transform duration-700 ease-out group-enabled:group-hover:translate-x-full group-disabled:hidden"
+                  />
+                  <span className="relative">Continue</span>
+                  <ChevronRight className="relative h-4 w-4 transition-transform duration-200 group-enabled:group-hover:translate-x-0.5" />
                 </button>
               )}
             </div>

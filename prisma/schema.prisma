@@ -30,8 +30,8 @@ model registry {
 }
 
 model reports {
-  id               String   @id
-  tracking_token   String   @unique
+  id               String    @id
+  tracking_token   String    @unique
   city_id          String
   city_name        String
   area_id          String
@@ -40,26 +40,191 @@ model reports {
   category_id      String
   category_title   String
   assigned_agency  String
-  sla_deadline     DateTime
+  sla_deadline     DateTime  @db.Timestamptz(6)
   urgency          String
   description      String
-  title            String   @default("")
-  selected_tags    String[] @default([])
+  title            String    @default("")
   photo_url        String?
-  geo_verification Json?
-  citizen_name     String   @default("Anonymous")
-  citizen_phone    String   @default("")
-  status           String   @default("triage")
-  upvotes          Int      @default(0)
-  created_at       DateTime @default(now())
-  dispatched_at    DateTime?
-  resolved_at      DateTime?
+  citizen_name     String    @default("Anonymous")
+  citizen_phone    String    @default("")
+  status           String    @default("triage")
+  upvotes          Int       @default(0)
+  created_at       DateTime  @default(now()) @db.Timestamptz(6)
+  dispatched_at    DateTime? @db.Timestamptz(6)
+  resolved_at      DateTime? @db.Timestamptz(6)
   assigned_unit    String?
   after_photo_url  String?
   resolution_notes String?
+  seq              BigInt    @default(autoincrement())
+  geo_verification Json?
   latitude         Float?
   longitude        Float?
-  seq              BigInt   @default(autoincrement())
+  selected_tags    String[]  @default([])
 
   @@index([created_at(sort: Desc)], map: "idx_reports_created")
+}
+
+model agencies {
+  id                     String      @id
+  sector_id              String
+  code                   String      @default("")
+  full_name              String      @default("")
+  headquarters           String      @default("")
+  hq_address             String?
+  descriptor             String      @default("")
+  province               String      @default("Punjab")
+  jurisdiction_districts Json        @default("[]")
+  status                 String      @default("active")
+  control_hotline        String?
+  dispatch_email         String?
+  webhook_url            String?
+  reports_enabled        Boolean?
+  maintenance            Boolean?
+  avg_resolution_hours   Decimal?    @db.Decimal
+  sort                   Int         @default(0)
+  sectors                sectors     @relation(fields: [sector_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  divisions              divisions[]
+}
+
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
+model areas {
+  id             String  @id
+  city_id        String
+  zone_id        BigInt?
+  name_en        String
+  name_ur        String?
+  uc_number      String?
+  jurisdiction   String?
+  sub_division   String?
+  active_tickets Int?
+  status         String?
+  supervisor     String?
+  contact        String?
+  office         String?
+  sort           Int     @default(0)
+  cities         cities  @relation(fields: [city_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  zones          zones?  @relation(fields: [zone_id], references: [id], onUpdate: NoAction)
+}
+
+model category_rules {
+  id                    String  @id
+  name_en               String
+  name_ur               String?
+  description           String?
+  icon_name             String?
+  default_agency        String  @default("MCS")
+  sla_hours             Int     @default(24)
+  urgency               String  @default("routine")
+  status                String  @default("active")
+  supported_cities      Json    @default("[]")
+  allowed_jurisdictions Json    @default("[]")
+  tags                  Json    @default("[]")
+  sort                  Int     @default(0)
+}
+
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
+model cities {
+  id             String    @id
+  province_id    BigInt
+  name_en        String
+  name_ur        String?
+  status         String    @default("coming_soon")
+  active_reports Int       @default(0)
+  agencies       Json?
+  subtext        String?
+  supervisor     String?
+  contact        String?
+  office         String?
+  sort           Int       @default(0)
+  areas          areas[]
+  provinces      provinces @relation(fields: [province_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  zones          zones[]
+}
+
+model divisions {
+  id                    String   @id
+  agency_id             String
+  district              String   @default("")
+  division_name         String   @default("")
+  division_name_urdu    String?
+  manager_name          String   @default("")
+  manager_designation   String   @default("")
+  official_phone        String   @default("")
+  official_extension    String?
+  control_room_hotline  String   @default("")
+  coverage              Json     @default("[]")
+  open_tickets          Int      @default(0)
+  resolved_tickets      Int      @default(0)
+  total_squads_deployed Int      @default(0)
+  sort                  Int      @default(0)
+  agencies              agencies @relation(fields: [agency_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  squads                squads[]
+}
+
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
+model provinces {
+  id           BigInt   @id @default(autoincrement())
+  name_en      String
+  name_ur      String?
+  kind         String?
+  capital      String?
+  code         String?
+  slug         String?
+  boundary     Json?
+  area_km2     Decimal? @db.Decimal
+  population   BigInt?
+  tiers        Json?
+  agencies     Json?
+  sla_p1_hours Int?
+  sla_p2_hours Int?
+  verification String?
+  lifecycle    String?
+  status       String?
+  admin_model  String?
+  sort         Int      @default(0)
+  cities       cities[]
+}
+
+model sectors {
+  id        String     @id
+  slug      String     @default("")
+  name      String     @default("")
+  name_urdu String     @default("")
+  icon      String     @default("")
+  unit      String?
+  sort      Int        @default(0)
+  agencies  agencies[]
+}
+
+model squads {
+  id              String    @id
+  division_id     String
+  name            String    @default("")
+  lead_technician String    @default("")
+  phone           String    @default("")
+  members_count   Int       @default(0)
+  status          String    @default("active")
+  role_class      String?
+  shift           String?
+  vehicle_plate   String?
+  wards           Json      @default("[]")
+  active_tickets  Int?
+  sort            Int       @default(0)
+  divisions       divisions @relation(fields: [division_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
+model zones {
+  id           BigInt  @id @default(autoincrement())
+  city_id      String
+  name_en      String
+  name_ur      String?
+  jurisdiction String  @default("Municipal Corporation")
+  authority    String?
+  supervisor   String?
+  contact      String?
+  office       String?
+  sort         Int     @default(0)
+  areas        areas[]
+  cities       cities  @relation(fields: [city_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 }

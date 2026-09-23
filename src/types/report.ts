@@ -10,6 +10,11 @@ import {
   Bug,
   Landmark,
 } from "lucide-react";
+import type { SeverityLevel } from "@/config/severity";
+
+/* Canonical severity taxonomy lives in @/config/severity — re-exported here
+   so existing `@/types/report` imports keep resolving. */
+export type { SeverityLevel };
 
 export type CategoryId =
   | "sanitation"
@@ -21,8 +26,6 @@ export type CategoryId =
   | "cantonment_infrastructure"
   | "streetlight"
   | "dengue";
-
-export type SeverityLevel = "routine" | "high" | "emergency";
 
 /** Live proof-of-presence telemetry locked by the report wizard's camera
     flow (LiveReportCapture). The fix is captured fresh at shutter time —
@@ -158,38 +161,6 @@ export const CATEGORY_META: Record<CategoryId, CategoryMeta> = {
   },
 };
 
-export interface SeverityMeta {
-  id: SeverityLevel;
-  label: string;
-  urdu: string;
-  description: string;
-  pillClass: string;
-}
-
-export const SEVERITY_META: Record<SeverityLevel, SeverityMeta> = {
-  routine: {
-    id: "routine",
-    label: "Routine",
-    urdu: "عام",
-    description: "Should be fixed within normal maintenance cycles",
-    pillClass: "bg-primary-tint text-primary",
-  },
-  high: {
-    id: "high",
-    label: "High",
-    urdu: "بلند",
-    description: "Disrupting daily life for many residents",
-    pillClass: "bg-warning-tint text-warning",
-  },
-  emergency: {
-    id: "emergency",
-    label: "Emergency",
-    urdu: "ہنگامی",
-    description: "Immediate danger to life or property",
-    pillClass: "bg-danger-tint text-danger",
-  },
-};
-
 export const AVAILABLE_TAGS: string[] = [
   "Blocked Drain",
   "Overflowing Bin",
@@ -204,7 +175,7 @@ export const AVAILABLE_TAGS: string[] = [
 /* ------------------------------- Feed cards ------------------------------- */
 
 export type FeedStatus = "action_required" | "in_progress" | "resolved";
-export type FeedSeverity = "normal" | "high" | "emergency";
+export type FeedSeverity = "routine" | "urgent" | "emergency";
 
 /** The card shape every report-listing surface renders — the community feed,
     the settings "My Reports" tab and the citizen workspace. Produced from a

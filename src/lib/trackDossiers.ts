@@ -218,7 +218,7 @@ const LIVE_URGENCY: Record<
   { label: string; tone: TrackDossier["urgencyTone"] }
 > = {
   emergency: { label: "Emergency Hazard (P1)", tone: "rose" },
-  high: { label: "High Priority (P2)", tone: "amber" },
+  urgent: { label: "Urgent Priority (P2)", tone: "amber" },
   routine: { label: "Routine (P3)", tone: "slate" },
 };
 

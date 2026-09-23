@@ -5,7 +5,7 @@
    SentinelView render live ledger rows mapped into RadarIncident
    (lib/liveReports) and flags produced by the abuse-detection pass. */
 
-export type RadarSeverity = "emergency" | "high" | "medium" | "contested";
+export type RadarSeverity = "emergency" | "urgent" | "routine" | "contested";
 
 /** Presentation tone for the status pill. TriageView widens this with
     "emerald" for resolved rows (see TriageTone in lib/liveReports). */

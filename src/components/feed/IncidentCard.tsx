@@ -68,7 +68,7 @@ export function agencyBucketOf(report: FeedReport): AgencyBucket {
 /** SLA window per severity — drives the dispatch ribbon countdown chip. */
 function slaLabelFor(report: FeedReport): string {
   const windowH =
-    report.severity === "emergency" ? 6 : report.severity === "high" ? 24 : 72;
+    report.severity === "emergency" ? 4 : report.severity === "urgent" ? 24 : 72;
   const remainingMin = Math.round((windowH - report.hoursAgo) * 60);
   if (remainingMin <= 0) return "breached · escalated";
   const h = Math.floor(remainingMin / 60);
@@ -162,18 +162,18 @@ export default function IncidentCard({
         </div>
         <div className="flex shrink-0 items-center gap-2 text-xs text-slate-400">
           {report.severity === "emergency" ? (
-            <span className="inline-flex animate-pulse items-center gap-1 rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-rose-700">
+            <span className="inline-flex animate-pulse items-center gap-1 rounded-full border border-rose-300 bg-rose-50 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-rose-700">
               <Zap className="h-3 w-3 text-rose-600" />
-              P1 Emergency
+              Emergency • شدید خطرہ
             </span>
-          ) : report.severity === "high" ? (
-            <span className="inline-flex items-center gap-1 rounded-full border border-amber-200/80 bg-amber-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700">
+          ) : report.severity === "urgent" ? (
+            <span className="inline-flex items-center gap-1 rounded-full border border-amber-300/80 bg-amber-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-900">
               <Zap className="h-3 w-3 text-amber-500" />
-              High
+              Urgent • فوری توجہ
             </span>
           ) : (
-            <span className="inline-flex items-center rounded-full border border-slate-200/60 bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">
-              Routine
+            <span className="inline-flex items-center rounded-full border border-slate-200/80 bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-700">
+              Routine • عام مسئلہ
             </span>
           )}
           <span aria-hidden className="text-slate-300">

@@ -24,10 +24,16 @@ function isValidRegistry(value: unknown): value is CoreSector[] {
 
 /** Server copy — `seeded: false` means the store has never been saved and
     holds an empty roster. */
-export async function fetchRegistry(): Promise<{
+export interface RegistrySnapshot {
   sectors: CoreSector[];
   seeded: boolean;
-}> {
+}
+
+/* Several console decks mount the registry at once, so concurrent callers
+   await one request rather than each issuing their own. */
+let inFlight: Promise<RegistrySnapshot> | null = null;
+
+async function loadRegistry(): Promise<RegistrySnapshot> {
   const res = await fetch("/api/departments", { cache: "no-store" });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const data = (await res.json()) as { sectors?: unknown; seeded?: boolean };
@@ -35,6 +41,15 @@ export async function fetchRegistry(): Promise<{
     sectors: isValidRegistry(data.sectors) ? data.sectors : [],
     seeded: data.seeded === true,
   };
+}
+
+export function fetchRegistry(): Promise<RegistrySnapshot> {
+  if (inFlight) return inFlight;
+  const pending = loadRegistry().finally(() => {
+    if (inFlight === pending) inFlight = null;
+  });
+  inFlight = pending;
+  return pending;
 }
 
 export async function pushRegistry(sectors: CoreSector[]): Promise<boolean> {

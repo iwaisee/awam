@@ -7,6 +7,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Activity, AlertTriangle } from "lucide-react";
 import type { IncidentReport } from "@/types/civic";
+import { fetchLedger } from "@/lib/ledgerClient";
 import GovernmentServicesCard from "@/components/admin/GovernmentServicesCard";
 
 /* --------------------------------- Helpers --------------------------------- */
@@ -52,18 +53,9 @@ export default function OverviewView() {
   useEffect(() => {
     let cancelled = false;
     const sync = () =>
-      fetch("/api/reports", { cache: "no-store" })
-        .then((res) =>
-          res.ok
-            ? res.json()
-            : Promise.reject(new Error(`HTTP ${res.status}`))
-        )
-        .then((data: unknown) => {
-          if (!cancelled)
-            setLedger({
-              reports: Array.isArray(data) ? (data as IncidentReport[]) : [],
-              syncedAt: Date.now(),
-            });
+      fetchLedger()
+        .then((reports) => {
+          if (!cancelled) setLedger({ reports, syncedAt: Date.now() });
         })
         .catch(() => {
           // Sync failed — keep the last known ledger.

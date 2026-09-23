@@ -1,3 +1,4 @@
+import { deleteImage } from "@/lib/cloudinary";
 import { ensureSchema, query } from "@/lib/pg";
 import type { IncidentReport } from "@/types/civic";
 
@@ -64,6 +65,7 @@ function rowToReport(row: Record<string, unknown>): IncidentReport {
             | undefined),
     citizen_name: String(row.citizen_name),
     citizen_phone: String(row.citizen_phone),
+    user_id: typeof row.user_id === "string" ? row.user_id : undefined,
     status: row.status as IncidentReport["status"],
     upvotes: Number(row.upvotes ?? 0),
     created_at: iso(row.created_at),
@@ -83,15 +85,25 @@ function rowToReport(row: Record<string, unknown>): IncidentReport {
 const COLUMNS = `id, tracking_token, city_id, city_name, area_id, area_name,
   jurisdiction, category_id, category_title, assigned_agency,
   sla_deadline, urgency, description, title, selected_tags, photo_url,
-  latitude, longitude, geo_verification, citizen_name, citizen_phone, status,
-  upvotes, created_at, dispatched_at, resolved_at, assigned_unit,
+  latitude, longitude, geo_verification, citizen_name, citizen_phone, user_id,
+  status, upvotes, created_at, dispatched_at, resolved_at, assigned_unit,
   after_photo_url, resolution_notes`;
 
-export async function listReports(): Promise<IncidentReport[]> {
+/** `userId` narrows the ledger to one account's own filings — the citizen
+    surfaces use it instead of re-filtering the public list by phone, which
+    broke as soon as a report carried a contact number other than the
+    account's. */
+export async function listReports(
+  userId?: string,
+): Promise<IncidentReport[]> {
   await ensureSchema();
   // `seq` (insertion order) replaces the SQLite rowid tie-break.
   const rows = await query<Record<string, unknown>>(
-    `SELECT ${COLUMNS} FROM reports ORDER BY created_at DESC, seq DESC`,
+    userId
+      ? `SELECT ${COLUMNS} FROM reports WHERE user_id = $1
+         ORDER BY created_at DESC, seq DESC`
+      : `SELECT ${COLUMNS} FROM reports ORDER BY created_at DESC, seq DESC`,
+    userId ? [userId] : [],
   );
   return rows.map((row) => rowToReport(row));
 }
@@ -127,7 +139,7 @@ export async function insertReport(
       $1, $2, $3, $4, $5, $6, $7,
       $8, $9, $10, $11, $12, $13, $14,
       $15, $16, $17, $18, $19::jsonb, $20, $21,
-      $22, $23, $24, $25, $26, $27, $28, $29
+      $22, $23, $24, $25, $26, $27, $28, $29, $30
     )`,
     [
       report.id,
@@ -151,6 +163,7 @@ export async function insertReport(
       report.geo_verification ? JSON.stringify(report.geo_verification) : null,
       report.citizen_name,
       report.citizen_phone,
+      report.user_id ?? null,
       report.status,
       report.upvotes,
       report.created_at,
@@ -185,31 +198,40 @@ export async function patchReport(
   const existing = await getReportByIdOrToken(id);
   if (!existing) return null;
 
-  const sets: string[] = [];
-  const args: (string | number | null)[] = [];
-  const add = (fragment: string, ...values: (string | number | null)[]) => {
-    for (const value of values) args.push(value);
-    sets.push(fragment);
-  };
+  /* One assignment per column, keyed by name. A status transition also rewrites
+     the fields it governs — a re-opened ticket loses its crew and its proof —
+     and emitting both that rule and an explicit value for the same column makes
+     Postgres reject the entire UPDATE ("multiple assignments to same column").
+     Keying lets the later, status-derived write win instead. Placeholders are
+     numbered at assembly, so fragments carry `?`. */
+  const assignments = new Map<
+    string,
+    { sql: string; values: (string | number | null)[] }
+  >();
+  const set = (
+    column: string,
+    sql: string,
+    ...values: (string | number | null)[]
+  ) => void assignments.set(column, { sql, values });
 
-  if (patch.status !== undefined) add(`status = $${args.length + 1}`, patch.status);
-  if (patch.assigned_unit !== undefined) add(`assigned_unit = $${args.length + 1}`, patch.assigned_unit);
-  if (patch.assigned_agency !== undefined) add(`assigned_agency = $${args.length + 1}`, patch.assigned_agency);
-  if (patch.after_photo_url !== undefined) add(`after_photo_url = $${args.length + 1}`, patch.after_photo_url);
-  if (patch.resolution_notes !== undefined) add(`resolution_notes = $${args.length + 1}`, patch.resolution_notes);
-  if (patch.urgency !== undefined) add(`urgency = $${args.length + 1}`, patch.urgency);
+  if (patch.status !== undefined) set("status", "status = ?", patch.status);
+  if (patch.assigned_unit !== undefined) set("assigned_unit", "assigned_unit = ?", patch.assigned_unit);
+  if (patch.assigned_agency !== undefined) set("assigned_agency", "assigned_agency = ?", patch.assigned_agency);
+  if (patch.after_photo_url !== undefined) set("after_photo_url", "after_photo_url = ?", patch.after_photo_url);
+  if (patch.resolution_notes !== undefined) set("resolution_notes", "resolution_notes = ?", patch.resolution_notes);
+  if (patch.urgency !== undefined) set("urgency", "urgency = ?", patch.urgency);
   if (patch.clearDispatchTelemetry) {
-    add("dispatched_at = NULL");
-    add("assigned_unit = NULL");
+    set("dispatched_at", "dispatched_at = NULL");
+    set("assigned_unit", "assigned_unit = NULL");
   }
   if (patch.stampDispatch && !existing.dispatched_at) {
-    add(`dispatched_at = $${args.length + 1}`, new Date().toISOString());
+    set("dispatched_at", "dispatched_at = ?", new Date().toISOString());
   }
-  if (patch.upvote) add("upvotes = upvotes + 1");
+  if (patch.upvote) set("upvotes", "upvotes = upvotes + 1");
   if (patch.status === "resolved") {
     // Re-resolving keeps the original stamp; a fresh resolution gets one.
     if (!existing.resolved_at) {
-      add(`resolved_at = $${args.length + 1}`, new Date().toISOString());
+      set("resolved_at", "resolved_at = ?", new Date().toISOString());
     }
   } else if (
     patch.status === "triage" ||
@@ -217,16 +239,55 @@ export async function patchReport(
     patch.status === "in_progress"
   ) {
     // Re-opened tickets lose their resolution telemetry and proof.
-    add("resolved_at = NULL");
-    add("after_photo_url = NULL");
-    add("resolution_notes = NULL");
+    set("resolved_at", "resolved_at = NULL");
+    set("after_photo_url", "after_photo_url = NULL");
+    set("resolution_notes", "resolution_notes = NULL");
   }
-  if (sets.length === 0) return existing;
+  if (assignments.size === 0) return existing;
+
+  const sets: string[] = [];
+  const args: (string | number | null)[] = [];
+  for (const { sql, values } of assignments.values()) {
+    let fragment = sql;
+    for (const value of values) {
+      args.push(value);
+      fragment = fragment.replace("?", `$${args.length}`);
+    }
+    sets.push(fragment);
+  }
 
   args.push(existing.id);
   await query(
     `UPDATE reports SET ${sets.join(", ")} WHERE id = $${args.length}`,
     args,
   );
-  return getReportByIdOrToken(existing.id);
+  const updated = await getReportByIdOrToken(existing.id);
+  /* A squad filing a second proof, or an admin re-opening the ticket, leaves
+     the old after-photo unreferenced. This is the one place holding both the
+     previous and the stored value, so the retired asset is destroyed here
+     rather than by every caller. Awaited: on serverless the process is frozen
+     the moment the response lands. */
+  const retired = existing.after_photo_url;
+  if (retired && updated?.after_photo_url !== retired) {
+    await deleteImage(retired);
+  }
+  return updated;
+}
+
+/** Remove a ticket from the ledger outright, returning the row that went so the
+    caller can name it. Both evidence photos are retired here: a deleted ticket
+    leaves them referenced by nothing, and this is the layer that knows their
+    URLs. */
+export async function deleteReport(id: string): Promise<IncidentReport | null> {
+  const existing = await getReportByIdOrToken(id);
+  if (!existing) return null;
+  await ensureSchema();
+  /* Row first, assets second — the order in patchReport. Destroying an image a
+     live ticket still points at would corrupt the ledger; losing a file that
+     references nothing is only a wasted byte. */
+  await query("DELETE FROM reports WHERE id = $1", [existing.id]);
+  for (const url of [existing.photo_url, existing.after_photo_url]) {
+    if (url) await deleteImage(url);
+  }
+  return existing;
 }

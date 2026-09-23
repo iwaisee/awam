@@ -12,7 +12,7 @@ import {
   Zap,
 } from "lucide-react";
 import Image from "next/image";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { FeedReport } from "@/types/report";
 import SharePopover from "./SharePopover";
 
@@ -132,13 +132,14 @@ export default function IncidentCard({
   const confirmCount = report.upvotes + (voted ? 1 : 0);
 
   // A deleted/broken evidence photo (e.g. a purged Cloudinary asset) must
-  // never render as an empty tile — drop back to the category texture.
-  const [thumbFailed, setThumbFailed] = useState(false);
-  useEffect(() => {
-    setThumbFailed(false);
-  }, [report.imageUrl]);
+  // never render as an empty tile — drop back to the category texture. The
+  // failed URL itself is remembered rather than a boolean, so swapping in a
+  // new photo clears the fallback on its own, with no effect to resync it.
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
   const thumbSrc =
-    !thumbFailed && report.imageUrl ? report.imageUrl : "/feed/street.svg";
+    report.imageUrl && report.imageUrl !== failedSrc
+      ? report.imageUrl
+      : "/feed/street.svg";
 
   return (
     <article className="group relative flex flex-col rounded-3xl border border-slate-200/90 bg-white p-6 shadow-xs transition-all duration-200 hover:border-emerald-500/40 hover:shadow-md">
@@ -204,7 +205,7 @@ export default function IncidentCard({
               fill
               sizes="(max-width: 640px) 100vw, 144px"
               className="object-cover"
-              onError={() => setThumbFailed(true)}
+              onError={() => setFailedSrc(report.imageUrl ?? null)}
             />
           </div>
         </div>

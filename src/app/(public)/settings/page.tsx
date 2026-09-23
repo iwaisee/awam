@@ -152,9 +152,8 @@ function SettingsPageInner() {
 
   const exportDossier = async () => {
     try {
-      const res = await fetch("/api/reports", { cache: "no-store" });
-      const all = (await res.json()) as IncidentReport[];
-      const mine = all.filter((r) => r.citizen_phone === savedProfile.phone);
+      const res = await fetch("/api/reports?mine=1", { cache: "no-store" });
+      const mine = (await res.json()) as IncidentReport[];
       const blob = new Blob(
         [
           JSON.stringify(
@@ -253,7 +252,7 @@ function SettingsPageInner() {
             {/* ========================= TAB: Reports ========================= */}
             {tab === "reports" && (
               <section role="tabpanel" aria-label="My Reports">
-                <ReportsTab citizenPhone={field("phone")} />
+                <ReportsTab />
               </section>
             )}
 

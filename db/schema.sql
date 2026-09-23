@@ -66,6 +66,54 @@ CREATE TABLE IF NOT EXISTS citizen_admin (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- ---------------------------- Citizen accounts ------------------------------
+-- Real credentials: scrypt password hash + database-backed sessions. The
+-- browser only ever holds the raw session token in an httpOnly cookie; both
+-- tables store a hash, so a leaked row or cookie dump is not replayable and
+-- signing out revokes the session server-side.
+
+CREATE TABLE IF NOT EXISTS citizen_users (
+  id TEXT PRIMARY KEY,
+  email TEXT NOT NULL,
+  phone TEXT NOT NULL DEFAULT '',
+  -- Digits-only local form (3001234567): sign-in identifier + attribution key.
+  phone_digits TEXT NOT NULL DEFAULT '',
+  name TEXT NOT NULL DEFAULT '',
+  district TEXT NOT NULL DEFAULT '',
+  -- Portrait: the Cloudinary CDN URL, or '' for the initials monogram.
+  avatar_url TEXT NOT NULL DEFAULT '',
+  password_hash TEXT NOT NULL,
+  email_verified BOOLEAN NOT NULL DEFAULT FALSE,
+  -- Per-citizen settings document (CitizenProfileSettings).
+  settings JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_citizen_users_email ON citizen_users (lower(email));
+-- Partial: an account without a phone must not collide on ''.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_citizen_users_phone ON citizen_users (phone_digits)
+  WHERE phone_digits <> '';
+-- Accounts predate the portrait column; this backfills an existing table.
+ALTER TABLE citizen_users ADD COLUMN IF NOT EXISTS avatar_url TEXT NOT NULL DEFAULT '';
+-- Portraits used to live as an inline data URL inside the settings document;
+-- move them onto the column and drop the key (both self-disable once run).
+UPDATE citizen_users SET avatar_url = settings->>'avatar_url'
+  WHERE avatar_url = '' AND settings->>'avatar_url' LIKE 'data:image/%';
+UPDATE citizen_users SET settings = settings - 'avatar_url'
+  WHERE settings ? 'avatar_url';
+
+CREATE TABLE IF NOT EXISTS citizen_sessions (
+  token_hash TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES citizen_users(id) ON DELETE CASCADE,
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_citizen_sessions_user ON citizen_sessions (user_id);
+CREATE INDEX IF NOT EXISTS idx_citizen_sessions_expiry ON citizen_sessions (expires_at);
+
+-- Which account filed the report (NULL for pre-account rows).
+ALTER TABLE reports ADD COLUMN IF NOT EXISTS user_id TEXT;
+
 -- ---------------- Territories (normalized coverage document) ----------------
 -- The client still speaks the whole-document { cities, categories, provinces }
 -- contract (see src/lib/territoriesDb.ts); these tables are its store.

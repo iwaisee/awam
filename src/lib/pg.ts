@@ -8,7 +8,7 @@ import { Pool, type QueryResultRow } from "pg";
 
 declare global {
   var __sadaPgPool: Pool | undefined;
-  var __sadaPgSchema: Promise<void> | undefined;
+  var __sadaPgSchema: { ddl: string; promise: Promise<void> } | undefined;
 }
 
 function createPool(): Pool {
@@ -222,6 +222,61 @@ CREATE TABLE IF NOT EXISTS citizen_admin (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+/* -------------------------- Citizen accounts & sessions --------------------
+   Real credentials. The browser only ever holds the raw session token in an
+   httpOnly cookie; both tables store a hash of it/them, so a leaked row (or a
+   leaked cookie dump) is not directly replayable, and signing out revokes the
+   session server-side rather than trusting a client-side store. */
+
+CREATE TABLE IF NOT EXISTS citizen_users (
+  id TEXT PRIMARY KEY,
+  email TEXT NOT NULL,
+  phone TEXT NOT NULL DEFAULT '',
+  -- Digits-only local form (3001234567): the sign-in identifier and the
+  -- attribution key, kept separate from the display-formatted phone.
+  phone_digits TEXT NOT NULL DEFAULT '',
+  name TEXT NOT NULL DEFAULT '',
+  district TEXT NOT NULL DEFAULT '',
+  -- Portrait: the Cloudinary CDN URL, or '' for the initials monogram.
+  avatar_url TEXT NOT NULL DEFAULT '',
+  password_hash TEXT NOT NULL,
+  email_verified BOOLEAN NOT NULL DEFAULT FALSE,
+  /* Per-citizen settings document (CitizenProfileSettings). Replaces the
+     shared app_state 'citizen-profile' doc, which every browser overwrote. */
+  settings JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_citizen_users_email ON citizen_users (lower(email));
+/* Partial: the pilot allows an account without a phone, and '' must not
+   collide across those rows. */
+CREATE UNIQUE INDEX IF NOT EXISTS idx_citizen_users_phone ON citizen_users (phone_digits)
+  WHERE phone_digits <> '';
+/* Accounts predate the portrait column, and CREATE TABLE IF NOT EXISTS is a
+   no-op for them — the ALTER is what backfills an existing table. */
+ALTER TABLE citizen_users ADD COLUMN IF NOT EXISTS avatar_url TEXT NOT NULL DEFAULT '';
+/* Portraits used to be stored as an inline data URL inside the settings
+   document. Move any of those onto the column, then drop the key so the column
+   is the only portrait source. Both statements self-disable once run. */
+UPDATE citizen_users SET avatar_url = settings->>'avatar_url'
+  WHERE avatar_url = '' AND settings->>'avatar_url' LIKE 'data:image/%';
+UPDATE citizen_users SET settings = settings - 'avatar_url'
+  WHERE settings ? 'avatar_url';
+
+CREATE TABLE IF NOT EXISTS citizen_sessions (
+  token_hash TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES citizen_users(id) ON DELETE CASCADE,
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_citizen_sessions_user ON citizen_sessions (user_id);
+CREATE INDEX IF NOT EXISTS idx_citizen_sessions_expiry ON citizen_sessions (expires_at);
+
+/* Ledger attribution: which account filed the report. Nullable — every row
+   filed before accounts existed, and every row filed through the squad or
+   admin surfaces, stays unattributed. */
+ALTER TABLE reports ADD COLUMN IF NOT EXISTS user_id TEXT;
+
 /* ---------------- Territories (normalized coverage document) ----------------
    The client still speaks the whole-document { cities, categories, provinces }
    contract (see territoriesDb.ts); these tables are its normalized store. */
@@ -382,17 +437,20 @@ CREATE TABLE IF NOT EXISTS squads (
 );
 `;
 
-/** Create every table once per process. A failed attempt is not cached, so a
-    bad DATABASE_URL can be fixed without restarting the dev server. */
+/** Create every table, keyed by the DDL text that was applied. A long-lived dev
+    server therefore picks up a table added to SCHEMA_DDL without a restart; a
+    failed attempt is not cached, so a bad DATABASE_URL can be fixed without
+    restarting either. */
 export function ensureSchema(): Promise<void> {
-  if (!globalThis.__sadaPgSchema) {
-    globalThis.__sadaPgSchema = getPool()
-      .query(SCHEMA_DDL)
-      .then(() => undefined)
-      .catch((error: unknown) => {
-        globalThis.__sadaPgSchema = undefined;
-        throw error;
-      });
-  }
-  return globalThis.__sadaPgSchema;
+  const applied = globalThis.__sadaPgSchema;
+  if (applied?.ddl === SCHEMA_DDL) return applied.promise;
+  const promise = getPool()
+    .query(SCHEMA_DDL)
+    .then(() => undefined)
+    .catch((error: unknown) => {
+      globalThis.__sadaPgSchema = undefined;
+      throw error;
+    });
+  globalThis.__sadaPgSchema = { ddl: SCHEMA_DDL, promise };
+  return promise;
 }

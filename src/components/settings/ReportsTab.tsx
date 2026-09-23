@@ -25,7 +25,7 @@ type FilterKey = "all" | "active" | "resolved";
 /** Display-count presets for the "Show:" selector — "all" disables slicing. */
 const PAGE_SIZE_OPTIONS: (number | "all")[] = [5, 10, 25, "all"];
 
-export default function ReportsTab({ citizenPhone }: { citizenPhone: string }) {
+export default function ReportsTab() {
   const [reports, setReports] = useState<IncidentReport[] | null>(null);
   // Clock captured once per fetch — SLA readouts stay stable per data load.
   const [fetchedAt, setFetchedAt] = useState(0);
@@ -70,18 +70,24 @@ export default function ReportsTab({ citizenPhone }: { citizenPhone: string }) {
     searchInputRef.current?.focus();
   };
 
+  /* Scoped by account id, not by matching the contact number on each ticket: a
+     report filed with a neighbour's phone still belongs to the citizen who
+     signed in and filed it. */
   useEffect(() => {
     void (async () => {
       await Promise.resolve();
       try {
-        const res = await fetch("/api/reports", { cache: "no-store" });
+        const res = await fetch("/api/reports?mine=1", { cache: "no-store" });
+        if (!res.ok) {
+          setReports([]);
+          setFetchedAt(Date.now());
+          return;
+        }
         const data = (await res.json()) as IncidentReport[];
-        const mine = data
-          .filter((r) => r.citizen_phone === citizenPhone)
-          .sort(
-            (a, b) =>
-              new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-          );
+        const mine = data.sort(
+          (a, b) =>
+            new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
         setReports(mine);
         setFetchedAt(Date.now());
       } catch {
@@ -89,7 +95,7 @@ export default function ReportsTab({ citizenPhone }: { citizenPhone: string }) {
         setFetchedAt(Date.now());
       }
     })();
-  }, [citizenPhone]);
+  }, []);
 
   const counts = useMemo(() => {
     const total = reports?.length ?? 0;

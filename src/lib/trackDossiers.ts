@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { Camera } from "lucide-react";
+import { Camera, ShieldCheck } from "lucide-react";
 import type { IncidentReport } from "@/types/civic";
 
 /* ----------------------------------------------------------------------------
@@ -18,6 +18,11 @@ export interface TrackStep {
   state: "completed" | "active" | "pending";
 }
 
+export interface PhotoDetail {
+  label: string;
+  value: string;
+}
+
 export interface TrackPhoto {
   label: string;
   /** Overlay stamp shown on the photo frame, e.g. "Uploaded: Yesterday, 3:39 PM". */
@@ -25,6 +30,10 @@ export interface TrackPhoto {
   caption: string;
   /** Real uploaded image; when absent the gradient+icon placeholder renders. */
   src?: string;
+  /** Provenance rows shown in the expanded evidence modal. */
+  details?: PhotoDetail[];
+  /** Line under the caption, e.g. the audit-log note. */
+  footnote?: string;
   icon: LucideIcon;
   gradient: string;
 }
@@ -242,6 +251,13 @@ export function dossierFromReport(r: IncidentReport): TrackDossier {
   const urgency = LIVE_URGENCY[r.urgency];
   const reported = `${dayLabel(created)}, ${fmtClock(created)}`;
   const location = [r.area_name, r.city_name].filter(Boolean).join(", ");
+  const coordinatesLabel = r.coordinates
+    ? `${r.coordinates.lat.toFixed(4)}° N, ${r.coordinates.lng.toFixed(4)}° E`
+    : undefined;
+  /* The proof stamp is read straight from the column: a disputed ticket keeps
+     both its resolution telemetry and its after-photo, so the status-gated
+     `resolvedAt` above would drop the date from the evidence card. */
+  const proofAt = r.resolved_at ? new Date(r.resolved_at).getTime() : undefined;
 
   const communityDetail =
     r.upvotes > 0
@@ -254,8 +270,56 @@ export function dossierFromReport(r: IncidentReport): TrackDossier {
         stamp: `Uploaded: ${reported}`,
         caption: r.description,
         src: r.photo_url,
+        details: [
+          {
+            label: "Capture",
+            value: r.geo_verification?.is_live_capture
+              ? "Live camera at the site"
+              : "Gallery upload",
+          },
+          ...(r.geo_verification?.accuracy_meters
+            ? [
+                {
+                  label: "GPS accuracy",
+                  value: `±${Math.round(r.geo_verification.accuracy_meters)} m`,
+                },
+              ]
+            : []),
+          ...(coordinatesLabel
+            ? [{ label: "Map pin", value: coordinatesLabel }]
+            : []),
+        ],
+        footnote: "Original EXIF & geotag retained in the municipal audit log.",
         icon: Camera,
         gradient: "from-slate-500 via-slate-600 to-slate-800",
+      }
+    : undefined;
+
+  const municipalPhoto: TrackPhoto | undefined = r.after_photo_url
+    ? {
+        label: `Uploaded by ${r.assigned_agency} Field Crew`,
+        stamp:
+          proofAt !== undefined
+            ? `Verified: ${dayLabel(proofAt)}, ${fmtClock(proofAt)}`
+            : "Verified by the field crew",
+        caption:
+          r.resolution_notes ||
+          "Completion proof filed from the site by the assigned crew.",
+        src: r.after_photo_url,
+        details: [
+          {
+            label: "Work order",
+            value: `#${normalizeToken(r.tracking_token || r.id)}`,
+          },
+          ...(r.assigned_unit
+            ? [{ label: "Crew", value: r.assigned_unit }]
+            : []),
+          { label: "Status", value: status.label },
+        ],
+        footnote:
+          "Checked against the citizen report pin before the ticket was closed.",
+        icon: ShieldCheck,
+        gradient: "from-emerald-600 via-emerald-700 to-teal-900",
       }
     : undefined;
 
@@ -320,9 +384,7 @@ export function dossierFromReport(r: IncidentReport): TrackDossier {
     reportedLabel: reported,
     location,
     jurisdiction: r.jurisdiction,
-    coordinatesLabel: r.coordinates
-      ? `${r.coordinates.lat.toFixed(4)}° N, ${r.coordinates.lng.toFixed(4)}° E`
-      : undefined,
+    coordinatesLabel,
     geo: r.coordinates ?? undefined,
     landmark: r.description,
     agency: r.assigned_agency,
@@ -340,8 +402,8 @@ export function dossierFromReport(r: IncidentReport): TrackDossier {
     },
     steps,
     citizenPhoto,
+    municipalPhoto,
     upvotes: r.upvotes,
     source: "live",
   };
 }
-

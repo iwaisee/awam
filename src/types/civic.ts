@@ -317,6 +317,10 @@ export interface IncidentReport {
   geo_verification?: GeoVerification;
   citizen_name: string;
   citizen_phone: string;
+  /** The account that filed this report. Server-assigned from the session —
+      never taken from the request body, so attribution cannot be forged.
+      Absent on rows filed before citizen accounts existed. */
+  user_id?: string;
   status: IncidentStatus;
   upvotes: number;
   created_at: string;
@@ -443,6 +447,9 @@ export interface CitizenProfile {
   name: string;
   /** Two-letter monogram for the header avatar circle ("Muhammad Usman" → "MU"). */
   avatar_initials: string;
+  /** Cloudinary portrait URL; absent until the citizen uploads one, so the
+      monogram shows instead. */
+  avatar_url?: string;
   /** Primary neighborhood anchor — shown instead of raw contact details. */
   home_locality: string;
   district: string;

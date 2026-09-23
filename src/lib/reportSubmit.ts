@@ -64,8 +64,12 @@ export function buildReportPayload(
     description: formData.description.trim(),
     // Quick-issue pills from Step 2 — capped at 3, matching the wizard limit.
     selected_tags: formData.selectedTags.slice(0, 3),
-    citizen_name: formData.isAnonymous ? "Anonymous" : "Registered Citizen",
-    citizen_phone: formData.isAnonymous ? "" : formData.phoneNumber.trim(),
+    /* The filer's name and attribution come from their session server-side;
+       these two are the only contact inputs the ledger accepts. `is_anonymous`
+       is what the public feed shows, `contact_phone` is the number crews call
+       about THIS hazard (the wizard hides it when filing anonymously). */
+    is_anonymous: formData.isAnonymous,
+    ...(formData.isAnonymous ? {} : { contact_phone: formData.phoneNumber.trim() }),
     // Proof-of-presence telemetry from the live camera flow. Sent only when
     // the citizen completed a verified capture; the API rejects nothing for
     // its absence (rows filed before the flow existed carry no telemetry).

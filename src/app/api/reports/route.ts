@@ -9,9 +9,9 @@ import {
   type IncidentReport,
   type IncidentStatus,
   type JurisdictionType,
-  type UrgencyLevel,
 } from "@/types/civic";
 import {
+  deleteReport,
   getReportByIdOrToken,
   insertReport,
   listReports,
@@ -19,14 +19,21 @@ import {
   ticketTokenExists,
 } from "@/lib/reportsDb";
 import { pickSquadForReport } from "@/lib/dispatchAssign";
-import { isCloudinaryConfigured, uploadReportImage } from "@/lib/cloudinary";
+import { isCloudinaryConfigured, uploadImage } from "@/lib/cloudinary";
+import { verifySession } from "@/lib/auth/session";
+import {
+  formatDisplayPhone,
+  isValidMobileDigits,
+  normalizePhoneDigits,
+} from "@/lib/auth/identifiers";
 
 /* Neon (Postgres) report ledger. The `reports` table starts EMPTY — every
    row comes from a real submission through the citizen wizard or this API.
    GET lists, POST files a new report, PATCH advances field-dispatch status
-   (and can re-route the agency or escalate urgency). Evidence images go to
-   Cloudinary when credentials are present (the row stores the CDN URL);
-   otherwise the inline data URL is kept, as before. */
+   (and can re-route the agency or escalate urgency), DELETE removes a ticket
+   outright. Evidence images go to Cloudinary when credentials are present
+   (the row stores the CDN URL); otherwise the inline data URL is kept, as
+   before — and an image a ticket stops pointing at is destroyed. */
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -51,15 +58,28 @@ async function persistEvidencePhoto(
   if (typeof raw !== "string" || !raw.startsWith("data:image/")) return {};
   if (raw.length > MAX_UPLOAD_CHARS) return { warning: PHOTO_TOO_LARGE_WARNING };
   if (isCloudinaryConfigured()) {
-    const url = await uploadReportImage(raw, kind);
+    const url = await uploadImage(raw, kind);
     if (url) return { url };
   }
   if (raw.length <= MAX_INLINE_CHARS) return { url: raw };
   return { warning: PHOTO_TOO_LARGE_WARNING };
 }
 
-export async function GET() {
-  return NextResponse.json(await listReports());
+/* GET serves the public ledger (the live feed and the admin console read it).
+   `?mine=1` narrows it to the signed-in citizen's own filings — attributed by
+   account id, which is why a report whose contact number differs from the
+   account's still shows up in My Reports. */
+export async function GET(request: Request) {
+  const mine = new URL(request.url).searchParams.get("mine") === "1";
+  if (!mine) return NextResponse.json(await listReports());
+  const user = await verifySession();
+  if (!user) {
+    return NextResponse.json(
+      { success: false, error: "Sign in to see your reports." },
+      { status: 401 },
+    );
+  }
+  return NextResponse.json(await listReports(user.id));
 }
 
 const INCIDENT_STATUSES: IncidentStatus[] = [
@@ -151,6 +171,23 @@ export async function PATCH(request: Request) {
 
     // Squad resolution proof — only meaningful on a resolved ticket. The
     // after-photo follows the shared evidence-photo policy (see above).
+    /* A re-opened ticket loses its proof, so a request that sends a photo *and*
+       a re-open status contradicts itself. Rejected before the upload, so the
+       bytes never reach Cloudinary only to be referenced by nothing. */
+    if (
+      ["triage", "dispatched", "in_progress"].includes(status as IncidentStatus) &&
+      typeof body.after_photo_url === "string" &&
+      body.after_photo_url.trim() !== ""
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "A resolution photo can only be attached to a ticket being resolved.",
+        },
+        { status: 400 },
+      );
+    }
     const afterPhoto = await persistEvidencePhoto(body.after_photo_url, "resolution");
     if (afterPhoto.url) patch.after_photo_url = afterPhoto.url;
     if (typeof body.resolution_notes === "string" && body.resolution_notes.trim())
@@ -213,6 +250,35 @@ const REQUIRED_FIELDS = [
 const asString = (value: unknown, fallback = ""): string =>
   typeof value === "string" ? value.trim() : fallback;
 
+/** The contact block stamped onto a new ticket, resolved from the SESSION
+    rather than the request body: attribution is the whole point of requiring
+    an account, so a submission cannot be filed in someone else's name or
+    traced back to a number the filer typed in freely.
+
+    `is_anonymous` stays a display choice about what the public feed and the
+    crew see; the account behind the report is always recorded. The optional
+    `contact_phone` is a number for THIS hazard (a neighbour's shop, a site
+    foreman), validated against the same mobile rule as signup and falling
+    back to the account's own number. */
+function resolveFilerIdentity(
+  body: Record<string, unknown>,
+  user: { id: string; name: string; phone: string },
+): { user_id: string; citizen_name: string; citizen_phone: string } {
+  const anonymous = body.is_anonymous === true;
+  const contact =
+    typeof body.contact_phone === "string"
+      ? normalizePhoneDigits(body.contact_phone)
+      : "";
+  const accountContact =
+    typeof user.phone === "string" ? normalizePhoneDigits(user.phone) : "";
+  const digits = contact && isValidMobileDigits(contact) ? contact : accountContact;
+  return {
+    user_id: user.id,
+    citizen_name: anonymous ? "Anonymous" : user.name || "Registered Citizen",
+    citizen_phone: anonymous || !digits ? "" : formatDisplayPhone(digits),
+  };
+}
+
 /** Proof-of-presence telemetry sent by the wizard's live camera flow. All
     fields optional; anything absent (older clients, no capture) yields null.
     The device user agent comes from the request header — the client's copy
@@ -251,6 +317,21 @@ function extractGeoVerification(
 
 export async function POST(request: Request) {
   try {
+    /* Filing a report is a citizen action with a municipal consequence, so it
+       requires a verified account — not just a browser. The wizard's own gate
+       is a redirect; this is the check that actually holds. */
+    const user = await verifySession();
+    if (!user) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Sign in to file a report.",
+          code: "AUTH_REQUIRED",
+        },
+        { status: 401 },
+      );
+    }
+
     const body = (await request.json()) as Record<string, unknown>;
 
     const missing = REQUIRED_FIELDS.filter((field) => {
@@ -298,6 +379,8 @@ export async function POST(request: Request) {
     // Citizen evidence photo, subject to the shared evidence-photo policy.
     const photo = await persistEvidencePhoto(body.photo_url, "report");
 
+    const filer = resolveFilerIdentity(body, user);
+
     const report: IncidentReport = {
       id: ticket,
       tracking_token: token,
@@ -328,8 +411,9 @@ export async function POST(request: Request) {
           ? (body.coordinates as { lat: number; lng: number })
           : undefined,
       geo_verification: extractGeoVerification(body, request) ?? undefined,
-      citizen_name: asString(body.citizen_name, "Anonymous") || "Anonymous",
-      citizen_phone: asString(body.citizen_phone),
+      citizen_name: filer.citizen_name,
+      citizen_phone: filer.citizen_phone,
+      user_id: filer.user_id,
       status: "triage",
       upvotes: 0,
       created_at: new Date().toISOString(),
@@ -367,6 +451,48 @@ export async function POST(request: Request) {
           error instanceof Error
             ? `Could not save report: ${error.message}`
             : "Could not save report.",
+      },
+      { status: 500 },
+    );
+  }
+}
+
+/* Wipe a ticket from the ledger — the console's "this was filed in error"
+   escape hatch. deleteReport retires both evidence photos with the row, so no
+   Cloudinary asset outlives the ticket that owned it.
+
+   Like PATCH, this has no credential behind it: the admin console still signs
+   nobody in. Until that is closed, anyone who can reach the API can delete a
+   ticket by id — which is the strongest argument for finishing console auth. */
+export async function DELETE(request: Request) {
+  const raw = new URL(request.url).searchParams.get("id");
+  const id =
+    typeof raw === "string" ? raw.trim().replace("#", "").toUpperCase() : "";
+
+  if (!id) {
+    return NextResponse.json(
+      { success: false, error: "Missing report id." },
+      { status: 400 },
+    );
+  }
+
+  try {
+    const deleted = await deleteReport(id);
+    if (!deleted) {
+      return NextResponse.json(
+        { success: false, error: `No report found for ${id}.` },
+        { status: 404 },
+      );
+    }
+    return NextResponse.json({ success: true, deleted: deleted.id });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        success: false,
+        error:
+          error instanceof Error
+            ? `Could not delete report: ${error.message}`
+            : "Could not delete report.",
       },
       { status: 500 },
     );

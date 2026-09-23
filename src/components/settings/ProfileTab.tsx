@@ -8,6 +8,7 @@ import {
   Camera,
   CheckCircle2,
   ChevronDown,
+  Loader2,
   MapPin,
   Pencil,
   ShieldCheck,
@@ -87,9 +88,13 @@ export default function ProfileTab({
     });
   };
 
-  /* Avatar picker (ephemeral — the picked image lands in the dirty draft) */
+  /* Avatar picker — the file goes straight to POST /api/auth/avatar, which
+     uploads it to Cloudinary and writes citizen_users.avatar_url. The local
+     data URL previews immediately and is swapped for the CDN URL on success; a
+     failed upload reverts the tile rather than stranding a dead preview. */
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const [avatarError, setAvatarError] = useState("");
+  const [avatarBusy, setAvatarBusy] = useState(false);
   const handleAvatarFile = async (file: File | null) => {
     setAvatarError("");
     if (!file) return;
@@ -101,16 +106,56 @@ export default function ProfileTab({
       setAvatarError("Image exceeds the 5MB limit.");
       return;
     }
+    const previous = draft.avatar_url;
     try {
-      // Canvas-downscaled data URL — persists in the Neon profile document like the admin
-      // portrait, instead of a blob: URL that dies with the session.
+      // Canvas-downscaled square — the bytes Cloudinary face-crops and serves.
       const dataUrl = await readDownscaledDataUrl(file, {
         maxSize: 400,
         square: true,
       });
       update({ avatar_url: dataUrl });
+      setAvatarBusy(true);
+      const response = await fetch("/api/auth/avatar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: dataUrl }),
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | { success?: boolean; error?: string; url?: string }
+        | null;
+      if (!response.ok || !payload?.success || !payload.url) {
+        update({ avatar_url: previous });
+        setAvatarError(payload?.error ?? "Could not upload that photo.");
+        return;
+      }
+      update({ avatar_url: payload.url });
     } catch {
+      update({ avatar_url: previous });
       setAvatarError("Could not read that image — try another file.");
+    } finally {
+      setAvatarBusy(false);
+    }
+  };
+
+  /* Clears citizen_users.avatar_url server-side; the tile falls back to the
+     initials monogram only once the write is acknowledged. */
+  const handleAvatarRemove = async () => {
+    setAvatarError("");
+    setAvatarBusy(true);
+    try {
+      const response = await fetch("/api/auth/avatar", { method: "DELETE" });
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as
+          | { error?: string }
+          | null;
+        setAvatarError(payload?.error ?? "Could not remove your photo.");
+        return;
+      }
+      update({ avatar_url: undefined });
+    } catch {
+      setAvatarError("Could not remove your photo.");
+    } finally {
+      setAvatarBusy(false);
     }
   };
 
@@ -190,8 +235,10 @@ export default function ProfileTab({
             <button
               type="button"
               onClick={() => avatarInputRef.current?.click()}
+              disabled={avatarBusy}
               aria-label="Change profile photo"
-              className="group relative flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-emerald-950 ring-2 ring-emerald-400/50 transition-shadow duration-150 hover:ring-emerald-300/70"
+              aria-busy={avatarBusy}
+              className="group relative flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-emerald-950 ring-2 ring-emerald-400/50 transition-shadow duration-150 hover:ring-emerald-300/70 disabled:cursor-progress"
             >
               {draft.avatar_url ? (
                 // eslint-disable-next-line @next/next/no-img-element
@@ -205,8 +252,16 @@ export default function ProfileTab({
                   {initialsFromName(draft.name)}
                 </span>
               )}
-              <span className="absolute inset-0 hidden items-center justify-center bg-emerald-950/60 group-hover:flex">
-                <Camera className="h-4 w-4 text-emerald-200" />
+              <span
+                className={`absolute inset-0 items-center justify-center bg-emerald-950/60 ${
+                  avatarBusy ? "flex" : "hidden group-hover:flex"
+                }`}
+              >
+                {avatarBusy ? (
+                  <Loader2 className="h-4 w-4 animate-spin text-emerald-200" />
+                ) : (
+                  <Camera className="h-4 w-4 text-emerald-200" />
+                )}
               </span>
             </button>
             <input
@@ -234,6 +289,17 @@ export default function ProfileTab({
                   {draft.district} • {municipalZoneLabel(draft.jurisdiction)}
                 </span>
               </p>
+              {draft.avatar_url && (
+                <button
+                  type="button"
+                  onClick={() => void handleAvatarRemove()}
+                  disabled={avatarBusy}
+                  className="mt-2 inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-200/80 underline decoration-emerald-200/40 underline-offset-2 transition-colors duration-150 hover:text-white disabled:cursor-progress disabled:opacity-60"
+                >
+                  <X className="h-3 w-3" />
+                  Remove photo
+                </button>
+              )}
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2 self-start rounded-xl border border-white/20 bg-white/10 px-3.5 py-1.5 backdrop-blur-md">

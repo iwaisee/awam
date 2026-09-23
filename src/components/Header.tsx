@@ -2,8 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useCitizenProfile } from "@/context/UserContext";
+import { signInHref } from "@/lib/auth/returnPath";
 import {
   Megaphone,
   Rss,
@@ -31,6 +32,7 @@ const NAV_LINKS = [
 
 export default function Header() {
   const pathname = usePathname();
+  const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
@@ -61,7 +63,17 @@ export default function Header() {
 
   // Public session — typed as CitizenProfile (role: "citizen"), so operational
   // routing can never leak into this menu even if items are ever shared.
-  const { currentUser, profile } = useCitizenProfile();
+  const { currentUser, profile, authenticated, hydrated, signOut } =
+    useCitizenProfile();
+
+  /** Sign-out revokes the session row server-side, then leaves the account
+      view the citizen was on — it is now a page they cannot open. */
+  const handleSignOut = async () => {
+    setProfileOpen(false);
+    setMenuOpen(false);
+    await signOut();
+    router.replace("/");
+  };
 
   const activeReports = Math.max(
     0,
@@ -155,7 +167,15 @@ export default function Header() {
             Report an Issue
           </Link>
 
-          <div className="relative hidden sm:block" ref={profileRef}>
+          {/* Toolbar identity is a session question, not a styling one: a
+              signed-out visitor gets the way in, never an empty avatar. */}
+          {!hydrated ? (
+            <span
+              aria-hidden
+              className="hidden h-11 w-11 rounded-full border border-slate-200 bg-slate-100 sm:block"
+            />
+          ) : authenticated ? (
+            <div className="relative hidden sm:block" ref={profileRef}>
             <button
               type="button"
               onClick={() => setProfileOpen(!profileOpen)}
@@ -164,9 +184,18 @@ export default function Header() {
               aria-label="Open citizen profile menu"
               className="flex cursor-pointer items-center gap-2.5 rounded-full border border-slate-200 bg-white p-1.5 pr-3 shadow-xs transition-all hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-emerald-600/20"
             >
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-800 text-xs font-bold text-white shadow-xs">
-                {currentUser.avatar_initials}
-              </span>
+              {currentUser.avatar_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={currentUser.avatar_url}
+                  alt=""
+                  className="h-8 w-8 shrink-0 rounded-full object-cover ring-1 ring-emerald-800/15"
+                />
+              ) : (
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-800 text-xs font-bold text-white shadow-xs">
+                  {currentUser.avatar_initials}
+                </span>
+              )}
               <span className="hidden min-w-0 max-w-[170px] leading-tight md:block">
                 <span className="flex items-center gap-1 text-[10px] font-semibold leading-none text-emerald-800">
                   <ShieldCheck className="h-3 w-3 shrink-0" />
@@ -267,9 +296,7 @@ export default function Header() {
                 <button
                   type="button"
                   role="menuitem"
-                  onClick={() => {
-                    setProfileOpen(false);
-                  }}
+                  onClick={() => void handleSignOut()}
                   className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-xs font-semibold text-rose-600 transition-colors duration-150 hover:bg-rose-50 hover:text-rose-700"
                 >
                   <LogOut className="h-4 w-4" />
@@ -277,7 +304,16 @@ export default function Header() {
                 </button>
               </div>
             )}
-          </div>
+            </div>
+          ) : (
+            <Link
+              href={signInHref("/report")}
+              className="hidden items-center gap-1.5 whitespace-nowrap rounded-full border-2 border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition-colors duration-150 hover:bg-emerald-50 sm:flex"
+            >
+              <ShieldCheck className="h-4 w-4" aria-hidden />
+              Sign In
+            </Link>
+          )}
 
           <button
             type="button"
@@ -294,7 +330,7 @@ export default function Header() {
       {/* Mobile slide-down menu */}
       <div
         className={`overflow-hidden border-slate-200/80 transition-all duration-300 lg:hidden ${
-          menuOpen ? "max-h-96 border-t" : "max-h-0"
+          menuOpen ? "max-h-[28rem] border-t" : "max-h-0"
         }`}
       >
         <nav aria-label="Mobile" className="space-y-1 bg-white px-6 py-4">
@@ -325,6 +361,44 @@ export default function Header() {
             Report an Issue
             <ArrowRight className="h-4 w-4" />
           </Link>
+          {/* The desktop toolbar's identity control, in its mobile form. */}
+          {hydrated && !authenticated ? (
+            <Link
+              href={signInHref("/report")}
+              onClick={() => setMenuOpen(false)}
+              className="mt-2 flex items-center justify-center gap-2 rounded-full border-2 border-emerald-700 px-5 py-2.5 text-sm font-semibold text-emerald-800 transition-colors duration-150 hover:bg-emerald-50"
+            >
+              <ShieldCheck className="h-4 w-4" aria-hidden />
+              Sign In • <span className="urdu">لاگ ان</span>
+            </Link>
+          ) : authenticated ? (
+            <>
+              <Link
+                href="/settings?tab=reports"
+                onClick={() => setMenuOpen(false)}
+                className="flex items-center gap-2.5 rounded-full px-4 py-2.5 text-sm font-medium text-slate-600 transition-colors duration-150 hover:bg-slate-100 hover:text-slate-950"
+              >
+                <FileText className="h-4 w-4" />
+                My Reports
+              </Link>
+              <Link
+                href="/settings?tab=profile"
+                onClick={() => setMenuOpen(false)}
+                className="flex items-center gap-2.5 rounded-full px-4 py-2.5 text-sm font-medium text-slate-600 transition-colors duration-150 hover:bg-slate-100 hover:text-slate-950"
+              >
+                <UserCheck className="h-4 w-4" />
+                My Profile
+              </Link>
+              <button
+                type="button"
+                onClick={() => void handleSignOut()}
+                className="flex items-center gap-2.5 rounded-full px-4 py-2.5 text-sm font-semibold text-rose-600 transition-colors duration-150 hover:bg-rose-50"
+              >
+                <LogOut className="h-4 w-4" />
+                Sign Out
+              </button>
+            </>
+          ) : null}
           <a
             href="tel:1122"
             className="flex items-center justify-center gap-2 rounded-full border border-rose-200/60 bg-rose-50 px-5 py-2.5 text-sm font-semibold text-rose-700 transition-colors duration-150 hover:bg-rose-100"

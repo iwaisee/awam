@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -16,33 +17,35 @@ import {
   Eye,
   EyeOff,
   Loader2,
-  Mail,
   MapPin,
   ShieldCheck,
 } from "lucide-react";
 import { useCitizenProfile } from "@/context/UserContext";
+import {
+  formatDisplayPhone,
+  isValidMobileDigits,
+  toLocalMobile,
+} from "@/lib/auth/identifiers";
+import { isSafeReturnPath } from "@/lib/auth/returnPath";
 
 /* Unified citizen authentication card — sign in & sign up share one surface so
    the incident-reporting flow never loses a half-typed phone number when a
-   first-time reporter switches tabs. Ownership is verified over EMAIL (a
-   6-digit code): the pilot has no SMS gateway, so phone stays a coordination
-   field for municipal teams while email carries the verification burden.
-   The Sialkot pilot runs on a client-side session store (no live auth
-   backend yet): the handlers below mint a demo token and bind it to the
-   UserContext citizen document — exactly the seam a real POST /api/auth/*
-   + email-delivery provider call will slot into. */
+   first-time reporter switches tabs.
 
-type AuthMode = "signin" | "signup" | "verify";
-type ErrorKey = "phone" | "email" | "password" | "name" | "pledge" | "code";
+   Both tabs talk to the real endpoints (POST /api/auth/signin and
+   /api/auth/signup), which verify the password against the stored scrypt hash
+   and answer by setting an httpOnly session cookie. The session belongs to the
+   server: this component never stores a token, and what it can read afterwards
+   is only what /api/auth/me says about the account behind that cookie.
+
+   Ownership of an account is proven by the password. Email ownership is NOT
+   proven yet — `citizen_users.email_verified` stays false until an email
+   delivery provider is wired, so the card says what will arrive rather than
+   pretending a code was sent. */
+
+type AuthMode = "signin" | "signup";
+type ErrorKey = "identifier" | "phone" | "email" | "password" | "name" | "district" | "pledge";
 type Strength = 0 | 1 | 2 | 3;
-
-const SESSION_KEY = "sada_auth_session";
-const SESSION_COOKIE = "sada_session";
-const THIRTY_DAYS_SECONDS = 30 * 24 * 60 * 60;
-const THIRTY_DAYS_MS = THIRTY_DAYS_SECONDS * 1000;
-const CODE_LENGTH = 6;
-const RESEND_SECONDS = 45;
-const EMPTY_CODE = Array<string>(CODE_LENGTH).fill("");
 
 const DISTRICTS = [
   "Sialkot (Pilot)",
@@ -60,76 +63,11 @@ const INPUT_BASE =
 const INPUT_INVALID =
   "border-rose-300 focus:border-rose-500 focus:ring-rose-500/20";
 
-interface StoredSession {
-  token: string;
-  phone: string | null;
-  email: string | null;
-  /** Which identifier the citizen authenticated with. */
-  method: "phone" | "email";
-  emailVerified: boolean;
-  remember: boolean;
-  issuedAt: number;
-  /** Null = browser-session scope (no "remember" tick). */
-  expiresAt: number | null;
-}
-
-/** Raw keypad noise → local Pakistani mobile form: digits only, trunk 0
-    dropped (citizens habitually type 0300… despite the +92 badge), capped at
-    10 digits, grouped "300 1234567" to match the placeholder. */
-function toLocalMobile(raw: string): string {
-  const digits = raw
-    .replace(/\D/g, "")
-    .replace(/^0+/, "")
-    .slice(0, 10);
-  return digits.length <= 3
-    ? digits
-    : `${digits.slice(0, 3)} ${digits.slice(3)}`;
-}
-
-/** Strip +92 / 0 prefixes so stored and freshly-typed numbers compare equal. */
-function normalizePhone(phone: string): string {
-  const digits = phone.replace(/\D/g, "");
-  if (digits.length === 12 && digits.startsWith("92")) return digits.slice(2);
-  if (digits.length === 11 && digits.startsWith("0")) return digits.slice(1);
-  return digits;
-}
-
-function isValidLocalMobile(localDigits: string): boolean {
-  // Local mobile parts run 3XX-XXXXXXX — the leading 3 is load-bearing.
-  return localDigits.length === 10 && localDigits.startsWith("3");
-}
-
-function isValidEmail(email: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
-}
-
-function generateOtp(): string {
-  return String(Math.floor(100000 + Math.random() * 900000));
-}
-
-/** Build the demo session document. Module-scope so the impure clock/random
-    reads stay out of render scope (react-hooks/purity). */
-function mintSession(
-  identity: { phone?: string; email?: string },
-  isRemembered: boolean,
-  method: "phone" | "email",
-  emailVerified: boolean
-): StoredSession {
-  const token =
-    typeof crypto !== "undefined" && "randomUUID" in crypto
-      ? crypto.randomUUID()
-      : `demo-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-  const issuedAt = Date.now();
-  return {
-    token,
-    phone: identity.phone ?? null,
-    email: identity.email ?? null,
-    method,
-    emailVerified,
-    remember: isRemembered,
-    issuedAt,
-    expiresAt: isRemembered ? issuedAt + THIRTY_DAYS_MS : null,
-  };
+interface AuthResponse {
+  success?: boolean;
+  error?: string;
+  field_errors?: Record<string, string>;
+  retry_after_seconds?: number;
 }
 
 /** 4 signals (length 8+, mixed case, digit, symbol) → Weak / Good / Strong. */
@@ -150,14 +88,6 @@ const STRENGTH_META: Record<1 | 2 | 3, { label: string; bar: string; text: strin
   3: { label: "Strong", bar: "bg-emerald-600", text: "text-emerald-700" },
 };
 
-/** Mirror the session token onto a cookie (session-scope unless remembered)
-    so future server components / middleware can recognise the citizen
-    without JS stores. Module-scope: global mutation stays out of render. */
-function mirrorSessionCookie(token: string, isRemembered: boolean) {
-  const maxAge = isRemembered ? `; max-age=${THIRTY_DAYS_SECONDS}` : "";
-  document.cookie = `${SESSION_COOKIE}=${token}; path=/; samesite=lax${maxAge}`;
-}
-
 function FieldError({ msg }: { msg?: string }) {
   if (!msg) return null;
   return (
@@ -167,16 +97,42 @@ function FieldError({ msg }: { msg?: string }) {
   );
 }
 
+/** Server-side field rejections arrive keyed by the request shape; the card
+    names its inputs after the same fields, except sign-in's single identifier
+    box, which the server answers as `identifier`. */
+function errorsForMode(
+  fieldErrors: Record<string, string> | undefined,
+  mode: AuthMode,
+  signInWith: "phone" | "email"
+): Partial<Record<ErrorKey, string>> {
+  if (!fieldErrors) return {};
+  const out: Partial<Record<ErrorKey, string>> = {};
+  for (const [key, message] of Object.entries(fieldErrors)) {
+    if (key === "identifier") {
+      out[mode === "signin" && signInWith === "phone" ? "phone" : "email"] = message;
+      continue;
+    }
+    if (key === "phone" && mode === "signin" && signInWith === "phone") {
+      out.phone = message;
+      continue;
+    }
+    if (key === "email" || key === "phone" || key === "password" || key === "name" || key === "district") {
+      out[key as ErrorKey] = message;
+    }
+  }
+  return out;
+}
+
 export default function UnifiedCitizenAuth() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { profile, updateProfile } = useCitizenProfile();
+  const { authenticated } = useCitizenProfile();
 
   // ?redirect=/report keeps the reporting funnel intact — but a citizen never
   // leaves the portal via a query param, so only same-origin paths pass.
   const redirectUrl = useMemo(() => {
-    const raw = searchParams.get("redirect") || "/report";
-    return raw.startsWith("/") && !raw.startsWith("//") ? raw : "/report";
+    const raw = searchParams.get("redirect");
+    return raw && isSafeReturnPath(raw) ? raw : "/report";
   }, [searchParams]);
 
   // Hydrate from ?mode=signup after mount (server render is always "signin",
@@ -197,13 +153,10 @@ export default function UnifiedCitizenAuth() {
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [pledge, setPledge] = useState(false);
 
-  // Email verification step (signup step 2).
-  const [demoCode, setDemoCode] = useState<string | null>(null);
-  const [code, setCode] = useState<string[]>(EMPTY_CODE);
-  const [resendIn, setResendIn] = useState(0);
-  const codeRefs = useRef<Array<HTMLInputElement | null>>([]);
-
   const [errors, setErrors] = useState<Partial<Record<ErrorKey, string>>>({});
+  /** Anything the server said that has no field to point at (wrong password,
+      a taken email, a lockout) — shown once above the form. */
+  const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -236,15 +189,11 @@ export default function UnifiedCitizenAuth() {
     return () => window.clearTimeout(timer);
   }, [toast]);
 
-  /* Resend cooldown countdown while the verification step is on screen. */
+  /* A citizen who signs in in another tab is signed in here too; leaving the
+     form on screen would offer an action that no longer applies. */
   useEffect(() => {
-    if (mode !== "verify" || resendIn <= 0) return;
-    const tick = window.setInterval(
-      () => setResendIn((seconds) => seconds - 1),
-      1000
-    );
-    return () => window.clearInterval(tick);
-  }, [mode, resendIn]);
+    if (authenticated && !submitting) router.replace(redirectUrl);
+  }, [authenticated, submitting, router, redirectUrl]);
 
   function clearError(key: ErrorKey) {
     setErrors((prev) => (prev[key] ? { ...prev, [key]: undefined } : prev));
@@ -253,10 +202,11 @@ export default function UnifiedCitizenAuth() {
   /** Tab switch keeps ?mode= shareable for deep links (e.g. from the report
       wizard's gate) without a router navigation — replaceState keeps the URL
       and useSearchParams in sync client-side. */
-  function switchMode(next: Exclude<AuthMode, "verify">) {
+  function switchMode(next: AuthMode) {
     if (next === mode || submitting) return;
     setMode(next);
     setErrors({});
+    setFormError(null);
     try {
       const params = new URLSearchParams(window.location.search);
       if (next === "signup") params.set("mode", "signup");
@@ -272,56 +222,73 @@ export default function UnifiedCitizenAuth() {
     }
   }
 
-  function persistSession(
-    identity: { phone?: string; email?: string },
-    isRemembered: boolean,
-    method: "phone" | "email",
-    emailVerified: boolean
+  /** Post-auth handoff: the cookie is already set by the response, so the only
+      thing left is to land the citizen where they were headed. UserContext
+      re-reads /api/auth/me on that navigation and the whole portal follows. */
+  const finishAuth = useCallback(
+    (displayName: string) => {
+      setToast(`Welcome, ${displayName}.`);
+      navigateTimer.current = window.setTimeout(
+        () => router.replace(redirectUrl),
+        400
+      );
+    },
+    [redirectUrl, router]
+  );
+
+  /** Shared submit path for both tabs. Returns nothing; every failure lands in
+      `formError` or the field chips, exactly as the server described it. */
+  async function submitAuth(
+    endpoint: "/api/auth/signin" | "/api/auth/signup",
+    payload: Record<string, unknown>,
+    displayName: string
   ) {
-    const session = mintSession(identity, isRemembered, method, emailVerified);
+    setSubmitting(true);
+    setErrors({});
+    setFormError(null);
     try {
-      window.localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = (await res.json().catch(() => null)) as AuthResponse | null;
+      if (!res.ok || !data?.success) {
+        setErrors(errorsForMode(data?.field_errors, mode, signInWith));
+        setFormError(
+          data?.error ?? "Something went wrong. Please try again."
+        );
+        setSubmitting(false);
+        return;
+      }
+      setSubmitting(false);
+      finishAuth(displayName);
     } catch {
-      // Storage quota hit — the in-memory UserContext session still stands.
+      // No response at all — the session was not created, so say so plainly
+      // rather than redirecting into a page that will bounce back here.
+      setFormError("Could not reach Sada-e-Awam. Check your connection and try again.");
+      setSubmitting(false);
     }
-    mirrorSessionCookie(session.token, isRemembered);
   }
 
-  /** Post-auth handoff. A pending incident draft outranks any ?redirect=
-      target: the citizen mid-report must land back in the wizard. */
-  function finishAuth(displayName: string) {
-    let hasDraft = false;
-    try {
-      hasDraft = Boolean(
-        window.sessionStorage.getItem("pending_incident_draft")
-      );
-    } catch {
-      hasDraft = false;
-    }
-    const target = hasDraft ? "/report" : redirectUrl;
-    if (hasDraft) {
-      setToast(
-        `Welcome back, ${displayName}. Resuming your incident report.`
-      );
-    }
-    navigateTimer.current = window.setTimeout(
-      () => router.replace(target),
-      hasDraft ? 1500 : 400
-    );
-  }
-
-  async function handleSignIn(event: FormEvent<HTMLFormElement>) {
+  function handleSignIn(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const localDigits = phoneNumber.replace(/\s/g, "");
     const nextErrors: Partial<Record<ErrorKey, string>> = {};
+    let identifier = "";
 
     if (signInWith === "phone") {
-      const localDigits = phoneNumber.replace(/\s/g, "");
-      if (!isValidLocalMobile(localDigits)) {
+      if (!isValidMobileDigits(localDigits)) {
         nextErrors.phone =
           "Enter your 10-digit mobile number (e.g. 300 1234567).";
+      } else {
+        identifier = formatDisplayPhone(localDigits);
       }
-    } else if (!isValidEmail(email)) {
-      nextErrors.email = "Enter a valid email — e.g. name@gmail.com.";
+    } else {
+      identifier = email.trim();
+      if (!identifier) {
+        nextErrors.email = "Enter the email you signed up with.";
+      }
     }
     if (!password) {
       nextErrors.password = "Enter your password.";
@@ -331,53 +298,29 @@ export default function UnifiedCitizenAuth() {
       return;
     }
 
-    setSubmitting(true);
-    setErrors({});
-    // Pilot stand-in for POST /api/auth/login.
-    await new Promise((resolve) => setTimeout(resolve, 700));
-
-    if (signInWith === "phone") {
-      const fullPhone = `+92 ${phoneNumber}`;
-      const returningCitizen =
-        normalizePhone(profile.phone) === normalizePhone(fullPhone);
-      // A phone the ledger has never seen gets a neutral header identity
-      // until the citizen edits their profile — never silently reuse the
-      // demo name.
-      const displayName = returningCitizen
-        ? profile.name
-        : `Citizen ${phoneNumber.replace(/\s/g, "").slice(-4)}`;
-
-      persistSession({ phone: fullPhone }, remember, "phone", false);
-      updateProfile({
-        name: displayName,
-        phone: fullPhone,
-        is_phone_verified: true,
-      });
-      finishAuth(displayName);
-      return;
-    }
-
-    const trimmedEmail = email.trim().toLowerCase();
-    const returningCitizen = (profile.email ?? "").toLowerCase() === trimmedEmail;
-    const displayName = returningCitizen ? profile.name : "Citizen";
-
-    persistSession({ email: trimmedEmail }, remember, "email", true);
-    updateProfile({ email: trimmedEmail });
-    finishAuth(displayName);
+    void submitAuth(
+      "/api/auth/signin",
+      { identifier, password, remember },
+      signInWith === "email"
+        ? email.trim().split("@")[0]
+        : `Citizen ${localDigits.slice(-4)}`
+    );
   }
 
-  async function handleSignUp(event: FormEvent<HTMLFormElement>) {
+  function handleSignUp(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const localDigits = phoneNumber.replace(/\s/g, "");
     const nextErrors: Partial<Record<ErrorKey, string>> = {};
     if (fullName.trim().length < 3) {
       nextErrors.name = "Enter your full name as printed on your CNIC.";
     }
-    if (!isValidEmail(email)) {
+    if (!email.trim()) {
       nextErrors.email = "Enter a valid email — e.g. name@gmail.com.";
     }
-    if (!isValidLocalMobile(localDigits)) {
+    if (!isValidMobileDigits(phoneNumber.replace(/\s/g, ""))) {
       nextErrors.phone = "Enter a valid mobile number (e.g. 300 1234567).";
+    }
+    if (!district) {
+      nextErrors.district = "Pick your city or district.";
     }
     if (newPassword.length < 8) {
       nextErrors.password = "Choose a password of at least 8 characters.";
@@ -391,103 +334,17 @@ export default function UnifiedCitizenAuth() {
       return;
     }
 
-    setSubmitting(true);
-    setErrors({});
-    // Pilot stand-in for POST /api/auth/send-code (email delivery provider).
-    await new Promise((resolve) => setTimeout(resolve, 800));
-
-    const freshCode = generateOtp();
-    setDemoCode(freshCode);
-    setCode(EMPTY_CODE);
-    setResendIn(RESEND_SECONDS);
-    setSubmitting(false);
-    setMode("verify");
-  }
-
-  async function verifyCode(codeValue: string) {
-    if (submitting) return;
-    if (codeValue.length < CODE_LENGTH) {
-      setErrors({ code: "Enter all 6 digits of the verification code." });
-      return;
-    }
-    setSubmitting(true);
-    setErrors({});
-    // Pilot stand-in for POST /api/auth/verify-code.
-    await new Promise((resolve) => setTimeout(resolve, 700));
-
-    if (codeValue !== demoCode) {
-      setSubmitting(false);
-      setErrors({
-        code: "That code doesn't match — check the digits and try again.",
-      });
-      return;
-    }
-
-    const fullPhone = `+92 ${phoneNumber}`;
-    persistSession(
-      { phone: fullPhone, email: email.trim().toLowerCase() },
-      true,
-      "email",
-      true
+    void submitAuth(
+      "/api/auth/signup",
+      {
+        name: fullName.trim(),
+        email: email.trim(),
+        phone: phoneNumber,
+        district,
+        password: newPassword,
+      },
+      fullName.trim().split(" ")[0]
     );
-    updateProfile({
-      name: fullName.trim(),
-      phone: fullPhone,
-      email: email.trim().toLowerCase(),
-      district,
-      is_phone_verified: true,
-    });
-    finishAuth(fullName.trim());
-  }
-
-  function handleResend() {
-    if (resendIn > 0 || submitting) return;
-    setDemoCode(generateOtp());
-    setCode(EMPTY_CODE);
-    setErrors({});
-    setResendIn(RESEND_SECONDS);
-    setToast(`A fresh code is on its way to ${email.trim()}.`);
-    codeRefs.current[0]?.focus();
-  }
-
-  function backToSignup() {
-    setMode("signup");
-    setCode(EMPTY_CODE);
-    setErrors({});
-  }
-
-  /** Keystroke into one OTP box: write the digit, advance focus, and
-      auto-submit once the sixth box completes the code. */
-  function setDigit(index: number, raw: string) {
-    const digit = raw.replace(/\D/g, "").slice(0, 1);
-    const next = code.map((value, position) =>
-      position === index ? digit : value
-    );
-    setCode(next);
-    if (digit && index < CODE_LENGTH - 1) {
-      codeRefs.current[index + 1]?.focus();
-    }
-    const joined = next.join("");
-    if (!next.includes("") && joined.length === CODE_LENGTH) {
-      void verifyCode(joined);
-    }
-  }
-
-  function handleCodePaste(index: number, raw: string) {
-    const digits = raw.replace(/\D/g, "").slice(0, CODE_LENGTH - index);
-    if (!digits) return;
-    const next = [...code];
-    digits.split("").forEach((digit, offset) => {
-      next[index + offset] = digit;
-    });
-    setCode(next);
-    codeRefs.current[
-      Math.min(index + digits.length, CODE_LENGTH - 1)
-    ]?.focus();
-    const joined = next.join("");
-    if (!next.includes("") && joined.length === CODE_LENGTH) {
-      void verifyCode(joined);
-    }
   }
 
   const strength = passwordStrength(newPassword);
@@ -591,12 +448,24 @@ export default function UnifiedCitizenAuth() {
       onClick={() => {
         setSignInWith(target);
         setErrors({});
+        setFormError(null);
       }}
       className="text-xs font-semibold text-emerald-700 hover:underline"
     >
       {target === "email" ? "Use email instead" : "Use phone instead"}
     </button>
   );
+
+  /** One place for the server's answer, so a wrong password and a taken email
+      are both impossible to miss and both sit above the fields they concern. */
+  const formErrorBanner = formError ? (
+    <p
+      role="alert"
+      className="rounded-xl bg-rose-50 px-3.5 py-2.5 text-xs font-semibold leading-relaxed text-rose-700 ring-1 ring-rose-200"
+    >
+      {formError}
+    </p>
+  ) : null;
 
   return (
     <main className="grid min-h-screen bg-slate-50 lg:grid-cols-[1.05fr_1fr]">
@@ -672,8 +541,8 @@ export default function UnifiedCitizenAuth() {
             <li className="flex items-start gap-2.5">
               <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" aria-hidden />
               <span>
-                <strong className="font-bold text-white">Verified identity.</strong>{" "}
-                Email-confirmed accounts keep every report authentic.
+                <strong className="font-bold text-white">One verified account.</strong>{" "}
+                Your reports, score and resolution proofs stay with you.
               </span>
             </li>
             <li className="flex items-start gap-2.5">
@@ -714,436 +583,310 @@ export default function UnifiedCitizenAuth() {
           </p>
         </header>
 
-        {mode === "verify" ? (
-          /* ── Signup step 2: email verification ── */
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              void verifyCode(code.join(""));
+        {/* Sliding dual-segment switcher */}
+        <div
+          role="tablist"
+          aria-label="Authentication mode"
+          className="relative flex w-full items-center rounded-2xl bg-slate-100 p-1"
+        >
+          <span
+            aria-hidden
+            className="absolute inset-y-1 left-1 w-[calc(50%-0.25rem)] rounded-xl bg-white shadow-2xs transition-transform duration-300 ease-out"
+            style={{
+              transform:
+                mode === "signup" ? "translateX(100%)" : "translateX(0)",
             }}
+          />
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === "signin"}
+            onClick={() => switchMode("signin")}
+            className={`relative z-10 flex-1 rounded-xl py-1.5 text-sm transition-colors duration-150 ${
+              mode === "signin"
+                ? "font-bold text-slate-900"
+                : "font-medium text-slate-500 hover:text-slate-700"
+            }`}
+          >
+            Sign In • <span className="urdu">لاگ ان</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === "signup"}
+            onClick={() => switchMode("signup")}
+            className={`relative z-10 flex-1 rounded-xl py-1.5 text-sm transition-colors duration-150 ${
+              mode === "signup"
+                ? "font-bold text-slate-900"
+                : "font-medium text-slate-500 hover:text-slate-700"
+            }`}
+          >
+            Sign Up • <span className="urdu">نیا اکاؤنٹ</span>
+          </button>
+        </div>
+
+        {mode === "signin" ? (
+          <form
+            key="signin"
+            onSubmit={handleSignIn}
             noValidate
             className="animate-fade-rise space-y-3.5"
           >
+            <p className="text-[13px] leading-snug text-slate-500">
+              {signInWith === "phone"
+                ? "Enter your registered mobile number to file and track reports."
+                : "Enter your registered email address to file and track reports."}
+            </p>
+
+            {formErrorBanner}
+
+            {signInWith === "phone"
+              ? phoneField("signin-phone", undefined, switchIdentifierLink("email"))
+              : emailField("signin-email", undefined, switchIdentifierLink("phone"))}
+
             <div className="space-y-1">
-              <p className="text-xs font-bold uppercase tracking-wide text-emerald-700">
-                Step 2 of 2 • Email Verification
-              </p>
-              <h2 className="text-lg font-black text-slate-900">
-                One last check
-              </h2>
-              <p className="text-[13px] leading-snug text-slate-500">
-                We sent a 6-digit code to{" "}
-                <span className="font-bold text-slate-700">{email.trim()}</span>
-                . Enter it below to activate your citizen account.
-              </p>
-            </div>
-
-            {demoCode ? (
-              <button
-                type="button"
-                onClick={() => {
-                  setCode(demoCode.split(""));
-                  codeRefs.current[CODE_LENGTH - 1]?.focus();
-                  void verifyCode(demoCode);
-                }}
-                className="flex w-full items-start gap-2 rounded-xl bg-amber-50 px-4 py-3 text-left text-xs font-semibold leading-relaxed text-amber-900 ring-1 ring-amber-200 transition-colors hover:bg-amber-100"
-              >
-                <Mail className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" aria-hidden />
-                <span>
-                  Pilot demo — email delivery isn&apos;t wired yet. Your code
-                  is{" "}
-                  <span className="font-black tracking-[0.2em]">{demoCode}</span>{" "}
-                  (tap to autofill).
-                </span>
-              </button>
-            ) : null}
-
-            <div className="flex gap-2">
-              {code.map((digit, index) => (
-                <input
-                  key={index}
-                  ref={(node) => {
-                    codeRefs.current[index] = node;
-                  }}
-                  type="text"
-                  inputMode="numeric"
-                  autoComplete={index === 0 ? "one-time-code" : "off"}
-                  maxLength={1}
-                  aria-label={`Verification digit ${index + 1}`}
-                  value={digit}
-                  onChange={(event) => setDigit(index, event.target.value)}
-                  onKeyDown={(event) => {
-                    if (
-                      event.key === "Backspace" &&
-                      !code[index] &&
-                      index > 0
-                    ) {
-                      codeRefs.current[index - 1]?.focus();
-                      setCode((prev) =>
-                        prev.map((value, position) =>
-                          position === index - 1 ? "" : value
-                        )
-                      );
-                    } else if (event.key === "ArrowLeft" && index > 0) {
-                      codeRefs.current[index - 1]?.focus();
-                    } else if (
-                      event.key === "ArrowRight" &&
-                      index < CODE_LENGTH - 1
-                    ) {
-                      codeRefs.current[index + 1]?.focus();
-                    }
-                  }}
-                  onPaste={(event) => {
-                    event.preventDefault();
-                    handleCodePaste(
-                      index,
-                      event.clipboardData.getData("text")
-                    );
-                  }}
-                  onFocus={(event) => event.target.select()}
-                  className={`h-11 w-full rounded-xl border bg-white text-center text-lg font-black text-slate-900 transition-colors duration-150 focus:border-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-700/20 ${
-                    errors.code
-                      ? "border-rose-300"
-                      : digit
-                        ? "border-emerald-600/60"
-                        : "border-slate-200"
-                  }`}
-                />
-              ))}
-            </div>
-            <FieldError msg={errors.code} />
-
-            {primaryButton("Verify & Create Account", "Verifying your code…")}
-
-            <div className="flex items-center justify-between text-xs">
-              <button
-                type="button"
-                onClick={backToSignup}
-                className="font-semibold text-slate-500 hover:text-slate-700 hover:underline"
-              >
-                Wrong email? Edit details
-              </button>
-              {resendIn > 0 ? (
-                <span className="font-medium text-slate-400">
-                  Resend code in {resendIn}s
-                </span>
-              ) : (
+              <div className="flex items-center justify-between">
+                <label
+                  htmlFor="signin-password"
+                  className="text-xs font-bold text-slate-700"
+                >
+                  Password
+                </label>
                 <button
                   type="button"
-                  onClick={handleResend}
-                  className="font-semibold text-emerald-700 hover:underline"
+                  onClick={() =>
+                    setToast(
+                      "Password reset opens with the Phase 2 rollout — helpline 135 can unlock your account today."
+                    )
+                  }
+                  className="text-xs font-semibold text-emerald-700 hover:underline"
                 >
-                  Resend code
+                  Forgot Password?
                 </button>
-              )}
+              </div>
+              <div className="relative">
+                <input
+                  id="signin-password"
+                  type={showPassword ? "text" : "password"}
+                  autoComplete="current-password"
+                  placeholder="Enter your account password"
+                  value={password}
+                  onChange={(event) => {
+                    setPassword(event.target.value);
+                    clearError("password");
+                  }}
+                  aria-invalid={Boolean(errors.password)}
+                  className={`${INPUT_BASE} pr-11 ${errors.password ? INPUT_INVALID : ""}`}
+                />
+                <button
+                  type="button"
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  onClick={() => setShowPassword((visible) => !visible)}
+                  className="absolute inset-y-0 right-0 flex w-10 items-center justify-center text-slate-400 transition-colors hover:text-slate-600"
+                >
+                  {showPassword ? (
+                    <EyeOff className="h-4 w-4" aria-hidden />
+                  ) : (
+                    <Eye className="h-4 w-4" aria-hidden />
+                  )}
+                </button>
+              </div>
+              <FieldError msg={errors.password} />
             </div>
+
+            <label className="flex cursor-pointer select-none items-center gap-2.5">
+              <input
+                type="checkbox"
+                checked={remember}
+                onChange={(event) => setRemember(event.target.checked)}
+                className="h-4 w-4 rounded border-slate-300 accent-emerald-600"
+              />
+              <span className="text-xs font-semibold text-slate-600">
+                Remember this device for 30 days
+              </span>
+            </label>
+
+            {primaryButton("Log In & Continue", "Securing your session…")}
+
+            <p className="text-center text-xs font-medium text-slate-500">
+              Don&rsquo;t have an account?{" "}
+              <button
+                type="button"
+                onClick={() => switchMode("signup")}
+                className="font-bold text-emerald-700 hover:underline"
+              >
+                Switch to Sign Up
+              </button>{" "}
+              above.
+            </p>
           </form>
         ) : (
-          <>
-            {/* Sliding dual-segment switcher */}
-            <div
-              role="tablist"
-              aria-label="Authentication mode"
-              className="relative flex w-full items-center rounded-2xl bg-slate-100 p-1"
-            >
-              <span
-                aria-hidden
-                className="absolute inset-y-1 left-1 w-[calc(50%-0.25rem)] rounded-xl bg-white shadow-2xs transition-transform duration-300 ease-out"
-                style={{
-                  transform:
-                    mode === "signup" ? "translateX(100%)" : "translateX(0)",
-                }}
-              />
-              <button
-                type="button"
-                role="tab"
-                aria-selected={mode === "signin"}
-                onClick={() => switchMode("signin")}
-                className={`relative z-10 flex-1 rounded-xl py-1.5 text-sm transition-colors duration-150 ${
-                  mode === "signin"
-                    ? "font-bold text-slate-900"
-                    : "font-medium text-slate-500 hover:text-slate-700"
-                }`}
-              >
-                Sign In • <span className="urdu">لاگ ان</span>
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={mode === "signup"}
-                onClick={() => switchMode("signup")}
-                className={`relative z-10 flex-1 rounded-xl py-1.5 text-sm transition-colors duration-150 ${
-                  mode === "signup"
-                    ? "font-bold text-slate-900"
-                    : "font-medium text-slate-500 hover:text-slate-700"
-                }`}
-              >
-                Sign Up • <span className="urdu">نیا اکاؤنٹ</span>
-              </button>
+          <form
+            key="signup"
+            onSubmit={handleSignUp}
+            noValidate
+            className="animate-fade-rise space-y-3.5"
+          >
+            <p className="text-[13px] leading-snug text-slate-500">
+              Create a citizen account in 30 seconds to submit verified
+              complaints.
+            </p>
+
+            {formErrorBanner}
+
+            <div className="grid gap-x-3 gap-y-1 sm:grid-cols-2">
+              <div className="space-y-1">
+                <label
+                  htmlFor="signup-name"
+                  className="text-xs font-bold text-slate-700"
+                >
+                  Full Name (as per CNIC)
+                </label>
+                <input
+                  id="signup-name"
+                  type="text"
+                  autoComplete="name"
+                  placeholder="e.g. Tariq Mehmood"
+                  value={fullName}
+                  onChange={(event) => {
+                    setFullName(event.target.value);
+                    clearError("name");
+                  }}
+                  aria-invalid={Boolean(errors.name)}
+                  className={`${INPUT_BASE} ${errors.name ? INPUT_INVALID : ""}`}
+                />
+                <FieldError msg={errors.name} />
+              </div>
+
+              {emailField("signup-email", "For updates about your reports.")}
             </div>
 
-            {mode === "signin" ? (
-              <form
-                key="signin"
-                onSubmit={handleSignIn}
-                noValidate
-                className="animate-fade-rise space-y-3.5"
-              >
-                <p className="text-[13px] leading-snug text-slate-500">
-                  {signInWith === "phone"
-                    ? "Enter your registered phone number to track your reports."
-                    : "Enter your registered email address to track your reports."}
-                </p>
+            <div className="grid gap-x-3 gap-y-1 sm:grid-cols-2">
+              {phoneField(
+                "signup-phone",
+                "So crews can reach you about a hazard."
+              )}
 
-                {signInWith === "phone"
-                  ? phoneField("signin-phone", undefined, switchIdentifierLink("email"))
-                  : emailField("signin-email", undefined, switchIdentifierLink("phone"))}
-
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between">
-                    <label
-                      htmlFor="signin-password"
-                      className="text-xs font-bold text-slate-700"
-                    >
-                      Password
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setToast(
-                          "Password reset opens with the Phase 2 rollout — helpline 135 can unlock your account today."
-                        )
-                      }
-                      className="text-xs font-semibold text-emerald-700 hover:underline"
-                    >
-                      Forgot Password?
-                    </button>
-                  </div>
-                  <div className="relative">
-                    <input
-                      id="signin-password"
-                      type={showPassword ? "text" : "password"}
-                      autoComplete="current-password"
-                      placeholder="Enter your account password"
-                      value={password}
-                      onChange={(event) => {
-                        setPassword(event.target.value);
-                        clearError("password");
-                      }}
-                      aria-invalid={Boolean(errors.password)}
-                      className={`${INPUT_BASE} pr-11 ${errors.password ? INPUT_INVALID : ""}`}
-                    />
-                    <button
-                      type="button"
-                      aria-label={showPassword ? "Hide password" : "Show password"}
-                      onClick={() => setShowPassword((visible) => !visible)}
-                      className="absolute inset-y-0 right-0 flex w-10 items-center justify-center text-slate-400 transition-colors hover:text-slate-600"
-                    >
-                      {showPassword ? (
-                        <EyeOff className="h-4 w-4" aria-hidden />
-                      ) : (
-                        <Eye className="h-4 w-4" aria-hidden />
-                      )}
-                    </button>
-                  </div>
-                  <FieldError msg={errors.password} />
-                </div>
-
-                <label className="flex cursor-pointer select-none items-center gap-2.5">
-                  <input
-                    type="checkbox"
-                    checked={remember}
-                    onChange={(event) => setRemember(event.target.checked)}
-                    className="h-4 w-4 rounded border-slate-300 accent-emerald-600"
-                  />
-                  <span className="text-xs font-semibold text-slate-600">
-                    Remember this device for 30 days
-                  </span>
+              <div className="space-y-1">
+                <label
+                  htmlFor="signup-district"
+                  className="text-xs font-bold text-slate-700"
+                >
+                  Your City / District
                 </label>
-
-                {primaryButton("Log In & Continue", "Securing your session…")}
-
-                <p className="text-center text-xs font-medium text-slate-500">
-                  Don&rsquo;t have an account?{" "}
-                  <button
-                    type="button"
-                    onClick={() => switchMode("signup")}
-                    className="font-bold text-emerald-700 hover:underline"
+                <div className="relative">
+                  <select
+                    id="signup-district"
+                    value={district}
+                    onChange={(event) => setDistrict(event.target.value)}
+                    className="w-full appearance-none rounded-xl border border-slate-200 bg-white px-3.5 py-2 pr-10 text-sm text-slate-900 transition-colors duration-150 focus:border-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-700/20"
                   >
-                    Switch to Sign Up
-                  </button>{" "}
-                  above.
-                </p>
-              </form>
-            ) : (
-              <form
-                key="signup"
-                onSubmit={handleSignUp}
-                noValidate
-                className="animate-fade-rise space-y-3.5"
+                    {DISTRICTS.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown
+                    className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+                    aria-hidden
+                  />
+                </div>
+                <FieldError msg={errors.district} />
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label
+                htmlFor="signup-password"
+                className="text-xs font-bold text-slate-700"
               >
-                <p className="text-[13px] leading-snug text-slate-500">
-                  Create a citizen account in 30 seconds to submit verified
-                  complaints.
-                </p>
-
-                <div className="grid gap-x-3 gap-y-1 sm:grid-cols-2">
-                  <div className="space-y-1">
-                    <label
-                      htmlFor="signup-name"
-                      className="text-xs font-bold text-slate-700"
-                    >
-                      Full Name (as per CNIC)
-                    </label>
-                    <input
-                      id="signup-name"
-                      type="text"
-                      autoComplete="name"
-                      placeholder="e.g. Tariq Mehmood"
-                      value={fullName}
-                      onChange={(event) => {
-                        setFullName(event.target.value);
-                        clearError("name");
-                      }}
-                      aria-invalid={Boolean(errors.name)}
-                      className={`${INPUT_BASE} ${errors.name ? INPUT_INVALID : ""}`}
-                    />
-                    <FieldError msg={errors.name} />
-                  </div>
-
-                  {emailField(
-                    "signup-email",
-                    "For verification and updates."
+                Create Password
+              </label>
+              <div className="relative">
+                <input
+                  id="signup-password"
+                  type={showNewPassword ? "text" : "password"}
+                  autoComplete="new-password"
+                  placeholder="Minimum 8 characters, e.g. Civic#2026"
+                  value={newPassword}
+                  onChange={(event) => {
+                    setNewPassword(event.target.value);
+                    clearError("password");
+                  }}
+                  aria-invalid={Boolean(errors.password)}
+                  className={`${INPUT_BASE} pr-11 ${errors.password ? INPUT_INVALID : ""}`}
+                />
+                <button
+                  type="button"
+                  aria-label={showNewPassword ? "Hide password" : "Show password"}
+                  onClick={() => setShowNewPassword((visible) => !visible)}
+                  className="absolute inset-y-0 right-0 flex w-10 items-center justify-center text-slate-400 transition-colors hover:text-slate-600"
+                >
+                  {showNewPassword ? (
+                    <EyeOff className="h-4 w-4" aria-hidden />
+                  ) : (
+                    <Eye className="h-4 w-4" aria-hidden />
                   )}
-                </div>
-
-                <div className="grid gap-x-3 gap-y-1 sm:grid-cols-2">
-                  {phoneField(
-                    "signup-phone",
-                    "Used to verify incident coordinates."
-                  )}
-
-                  <div className="space-y-1">
-                    <label
-                      htmlFor="signup-district"
-                      className="text-xs font-bold text-slate-700"
-                    >
-                      Your City / District
-                    </label>
-                    <div className="relative">
-                      <select
-                        id="signup-district"
-                        value={district}
-                        onChange={(event) => setDistrict(event.target.value)}
-                        className="w-full appearance-none rounded-xl border border-slate-200 bg-white px-3.5 py-2 pr-10 text-sm text-slate-900 transition-colors duration-150 focus:border-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-700/20"
-                      >
-                        {DISTRICTS.map((option) => (
-                          <option key={option} value={option}>
-                            {option}
-                          </option>
-                        ))}
-                      </select>
-                      <ChevronDown
-                        className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
-                        aria-hidden
+                </button>
+              </div>
+              {newPassword && strengthMeta ? (
+                <div className="flex items-center gap-2 pt-0.5">
+                  <div className="flex flex-1 gap-1.5" aria-hidden>
+                    {[1, 2, 3].map((bar) => (
+                      <span
+                        key={bar}
+                        className={`h-1 flex-1 rounded-full transition-colors duration-200 ${
+                          bar <= strength ? strengthMeta.bar : "bg-slate-200"
+                        }`}
                       />
-                    </div>
+                    ))}
                   </div>
+                  <span className={`text-xs font-bold ${strengthMeta.text}`}>
+                    {strengthMeta.label}
+                  </span>
                 </div>
+              ) : null}
+              <FieldError msg={errors.password} />
+            </div>
 
-                <div className="space-y-1">
-                  <label
-                    htmlFor="signup-password"
-                    className="text-xs font-bold text-slate-700"
-                  >
-                    Create Password
-                  </label>
-                  <div className="relative">
-                    <input
-                      id="signup-password"
-                      type={showNewPassword ? "text" : "password"}
-                      autoComplete="new-password"
-                      placeholder="Minimum 8 characters, e.g. Civic#2026"
-                      value={newPassword}
-                      onChange={(event) => {
-                        setNewPassword(event.target.value);
-                        clearError("password");
-                      }}
-                      aria-invalid={Boolean(errors.password)}
-                      className={`${INPUT_BASE} pr-11 ${errors.password ? INPUT_INVALID : ""}`}
-                    />
-                    <button
-                      type="button"
-                      aria-label={showNewPassword ? "Hide password" : "Show password"}
-                      onClick={() => setShowNewPassword((visible) => !visible)}
-                      className="absolute inset-y-0 right-0 flex w-10 items-center justify-center text-slate-400 transition-colors hover:text-slate-600"
-                    >
-                      {showNewPassword ? (
-                        <EyeOff className="h-4 w-4" aria-hidden />
-                      ) : (
-                        <Eye className="h-4 w-4" aria-hidden />
-                      )}
-                    </button>
-                  </div>
-                  {newPassword && strengthMeta ? (
-                    <div className="flex items-center gap-2 pt-0.5">
-                      <div className="flex flex-1 gap-1.5" aria-hidden>
-                        {[1, 2, 3].map((bar) => (
-                          <span
-                            key={bar}
-                            className={`h-1 flex-1 rounded-full transition-colors duration-200 ${
-                              bar <= strength ? strengthMeta.bar : "bg-slate-200"
-                            }`}
-                          />
-                        ))}
-                      </div>
-                      <span className={`text-xs font-bold ${strengthMeta.text}`}>
-                        {strengthMeta.label}
-                      </span>
-                    </div>
-                  ) : null}
-                  <FieldError msg={errors.password} />
-                </div>
+            <div className="space-y-1">
+              <label className="flex cursor-pointer select-none items-start gap-2.5 rounded-xl bg-slate-50 px-3 py-2.5">
+                <input
+                  type="checkbox"
+                  checked={pledge}
+                  onChange={(event) => {
+                    setPledge(event.target.checked);
+                    clearError("pledge");
+                  }}
+                  aria-invalid={Boolean(errors.pledge)}
+                  className="mt-0.5 h-4 w-4 rounded border-slate-300 accent-emerald-600"
+                />
+                <span className="text-xs font-semibold leading-relaxed text-slate-600">
+                  I confirm I&apos;ll only report genuine hazards I&apos;ve
+                  seen myself — false reports can lower my civic score.
+                </span>
+              </label>
+              <FieldError msg={errors.pledge} />
+            </div>
 
-                <div className="space-y-1">
-                  <label className="flex cursor-pointer select-none items-start gap-2.5 rounded-xl bg-slate-50 px-3 py-2.5">
-                    <input
-                      type="checkbox"
-                      checked={pledge}
-                      onChange={(event) => {
-                        setPledge(event.target.checked);
-                        clearError("pledge");
-                      }}
-                      aria-invalid={Boolean(errors.pledge)}
-                      className="mt-0.5 h-4 w-4 rounded border-slate-300 accent-emerald-600"
-                    />
-                    <span className="text-xs font-semibold leading-relaxed text-slate-600">
-                      I confirm I&apos;ll only report genuine hazards I&apos;ve
-                      seen myself — false reports can lower my civic score.
-                    </span>
-                  </label>
-                  <FieldError msg={errors.pledge} />
-                </div>
-
-                {primaryButton(
-                  "Create Citizen Account",
-                  "Sending your verification code…"
-                )}
-
-                <p className="text-center text-xs font-medium text-slate-500">
-                  Already registered?{" "}
-                  <button
-                    type="button"
-                    onClick={() => switchMode("signin")}
-                    className="font-bold text-emerald-700 hover:underline"
-                  >
-                    Switch to Sign In
-                  </button>{" "}
-                  above.
-                </p>
-              </form>
+            {primaryButton(
+              "Create Citizen Account",
+              "Creating your account…"
             )}
-          </>
+
+            <p className="text-center text-xs font-medium text-slate-500">
+              Already registered?{" "}
+              <button
+                type="button"
+                onClick={() => switchMode("signin")}
+                className="font-bold text-emerald-700 hover:underline"
+              >
+                Switch to Sign In
+              </button>{" "}
+              above.
+            </p>
+          </form>
         )}
 
         {/* Pilot trust strip */}

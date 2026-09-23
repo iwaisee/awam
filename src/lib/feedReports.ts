@@ -140,8 +140,10 @@ export function useLiveFeedReports(refreshKey = 0): {
     };
   }, [refreshKey]);
 
+  /* fetchedAt is 0 only while `raw` is still empty — the success path always
+     stamps it — so the clock needs no render-time fallback here. */
   const reports = useMemo(
-    () => state.raw.map((r) => toFeedReport(r, state.fetchedAt || Date.now())),
+    () => state.raw.map((r) => toFeedReport(r, state.fetchedAt)),
     [state.raw, state.fetchedAt],
   );
   return { reports, raw: state.raw, loading: state.key !== refreshKey };

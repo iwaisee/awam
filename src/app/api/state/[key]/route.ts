@@ -2,13 +2,17 @@ import { NextResponse } from "next/server";
 import { readState, writeState } from "@/lib/appStateDb";
 
 /* Shared application state transport. Keys are whitelisted — anything a
-   browser can push must be a documented shared document. */
+   browser can push must be a documented shared document.
+
+   "citizen-profile" is gone from this list on purpose: it was one global
+   document that every browser read and overwrote, so a citizen's settings were
+   visible to (and replaceable by) everyone. A citizen's own record now lives on
+   their account row and moves through the authenticated /api/auth/me. */
 
 const ALLOWED_KEYS = new Set([
   "coverage",
   "system-prefs",
   "admin-profile",
-  "citizen-profile",
 ]);
 
 export async function GET(

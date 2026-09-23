@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
   ArrowLeftRight,
@@ -14,14 +13,17 @@ import {
   Clock,
   Inbox,
   MapPin,
+  Maximize2,
   Mic,
   Phone,
   RotateCcw,
   Search,
+  ShieldCheck,
   Siren,
   Tag,
   ThumbsUp,
   Timer,
+  Trash2,
   Truck,
   X,
   Zap,
@@ -101,6 +103,19 @@ const fmtDuration = (hours: number) =>
     ? `${Math.round(hours * 10) / 10}h`
     : `${Math.round((hours / 24) * 10) / 10}d`;
 
+/** Ledger ISO stamp → "Sep 23, 5:48 PM"; null when the column is empty. */
+function fmtStamp(iso?: string): string | null {
+  if (!iso) return null;
+  const ms = new Date(iso).getTime();
+  if (!Number.isFinite(ms)) return null;
+  return new Date(ms).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 const SEGMENTS = [
   { id: "all", label: "All Open", count: "1,248" },
   { id: "emergency", label: "Emergency & Critical", count: "19" },
@@ -125,7 +140,6 @@ const PAGE_SIZES = [10, 20, 50, 100];
 /* -------------------------------- Component -------------------------------- */
 
 export default function TriageView() {
-  const router = useRouter();
   // The queue IS the live Neon ledger — no demo baseline is merged in.
   const [refreshKey, setRefreshKey] = useState(0);
   const { live, raw, settledAt } = useLiveReports(refreshKey);
@@ -174,6 +188,19 @@ export default function TriageView() {
     } | null;
     setRefreshKey((k) => k + 1);
     return { ok: true as const, crew: data?.report?.assigned_unit ?? null };
+  };
+
+  /* Deleting is the one irreversible action in the inspector, so it does not
+     ride apiPatch: the row goes and deleteReport retires its evidence photos
+     with it. The queue re-syncs either way; the drawer only closes on success. */
+  const removeTicket = async (incidentId: string) => {
+    const res = await fetch(
+      `/api/reports?id=${encodeURIComponent(incidentId)}`,
+      { method: "DELETE" },
+    );
+    setRefreshKey((k) => k + 1);
+    if (res.ok) closeDossier();
+    return res.ok;
   };
 
   // Drawer action handler — maps presentation intent to ledger fields.
@@ -698,7 +725,6 @@ export default function TriageView() {
               <tbody>
                 {paginatedRows.map((row) => {
                   const sev = SEVERITY_PILLS[row.severity];
-                  const hours = hoursOf(row.elapsed);
                   const health = slaHealthOf(row);
                   const breached = health === "breached";
                   const dueSoon = health === "due-soon";
@@ -911,6 +937,7 @@ export default function TriageView() {
           now={settledAt}
           onClose={closeDossier}
           onAction={handleDrawerAction}
+          onDelete={removeTicket}
         />
       )}
     </>
@@ -925,6 +952,7 @@ function IncidentDrawer({
   now,
   onClose,
   onAction,
+  onDelete,
 }: {
   incident: TriageIncident;
   open: boolean;
@@ -938,12 +966,20 @@ function IncidentDrawer({
     incidentId: string,
     rerouteTo?: string,
   ) => Promise<{ ok: boolean; crew: string | null }>;
+  /** Deletes the ticket outright — row and both evidence photos. Success
+      closes the drawer, so a note is only ever read on failure. */
+  onDelete: (incidentId: string) => Promise<boolean>;
 }) {
   const [rerouteTo, setRerouteTo] = useState(
     REROUTE_AGENCIES.includes(incident.agency) ? incident.agency : "MCS"
   );
   const [actionNote, setActionNote] = useState<string | null>(null);
   const [noteError, setNoteError] = useState(false);
+  // Two-step delete: the button arms itself, the second click commits.
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  // Evidence lightbox — the tiles are too small to judge a repair from.
+  const [zoom, setZoom] = useState<{ src: string; label: string } | null>(null);
   // Flip one frame after mount so the panel transitions in from off-screen.
   const [entered, setEntered] = useState(false);
 
@@ -960,11 +996,14 @@ function IncidentDrawer({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key !== "Escape") return;
+      // The lightbox sits on top of the drawer, so it backs out first.
+      if (zoom) setZoom(null);
+      else onClose();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, zoom]);
 
   const shown = entered && open;
   const sev = SEVERITY_PILLS[incident.severity];
@@ -993,6 +1032,14 @@ function IncidentDrawer({
 
   const lifecycleStep = resolved ? 2 : dispatched ? 1 : 0;
   const lifecycle = ["Filed", "Dispatched", "Resolved"] as const;
+
+  /* Proof-of-work reads off the resolution columns, not the status pill: a
+     disputed ticket still carries the crew's photo and notes. */
+  const resolvedStamp = fmtStamp(incident.resolvedAt);
+  const proofMeta = [
+    incident.assignedUnit,
+    resolvedStamp ? `Verified ${resolvedStamp}` : null,
+  ].filter((part): part is string => Boolean(part));
 
   const dispatch = async () => {
     const { ok, crew } = await onAction("dispatch", incident.id);
@@ -1031,6 +1078,16 @@ function IncidentDrawer({
         ? "Marked resolved — awaiting citizen photo verification"
         : "Could not reach the ledger — please retry.",
     );
+  };
+  const remove = async () => {
+    setDeleting(true);
+    const ok = await onDelete(incident.id);
+    setDeleting(false);
+    setConfirmDelete(false);
+    if (!ok) {
+      setNoteError(true);
+      setActionNote("Could not delete the ticket — please retry.");
+    }
   };
 
   return (
@@ -1211,27 +1268,47 @@ function IncidentDrawer({
             </div>
           </section>
 
-          {/* Evidence — the citizen's own photo, location fix, report, tags */}
+          {/* Evidence — the citizen's photo beside the crew's proof of work */}
           <section className="border-b border-slate-100 px-5 py-4">
             <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
               Evidence
             </h3>
-            {incident.photoUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element -- ledger photo is a downscaled data URL; next/image can't optimize it.
-              <img
+            <div className="mt-2.5 grid grid-cols-2 gap-2.5">
+              <EvidenceTile
+                angle="before"
                 src={incident.photoUrl}
-                alt={`Photo submitted with ${incident.id}`}
-                className="mt-2.5 h-44 w-full rounded-xl object-cover ring-1 ring-slate-200"
+                label={`Citizen upload · ${incident.id}`}
+                emptyLabel="No photo attached"
+                tint={incident.photoTint}
+                onZoom={setZoom}
               />
-            ) : (
-              <div
-                className={`relative mt-2.5 flex h-36 items-center justify-center rounded-xl bg-gradient-to-br ${incident.photoTint}`}
-              >
-                <Camera className="h-8 w-8 text-white/50" />
-                <span className="absolute bottom-2.5 left-1/2 w-max -translate-x-1/2 rounded-full bg-white/95 px-3 py-1 text-[10px] font-bold text-slate-500">
-                  No photo attached
-                </span>
-              </div>
+              <EvidenceTile
+                angle="after"
+                src={incident.afterPhotoUrl}
+                label={`Crew proof · ${incident.id}`}
+                emptyLabel={
+                  resolved || incident.rawStatus === "disputed"
+                    ? "No proof filed"
+                    : "Awaiting resolution"
+                }
+                onZoom={setZoom}
+              />
+            </div>
+            {incident.resolutionNotes && (
+              <blockquote className="mt-3 rounded-xl border-l-4 border-emerald-600/60 bg-emerald-50/70 px-3.5 py-2.5">
+                <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-emerald-700">
+                  <ShieldCheck className="h-3 w-3" />
+                  Field crew report
+                </p>
+                <p className="mt-1 text-sm leading-6 text-slate-700">
+                  {incident.resolutionNotes}
+                </p>
+                {proofMeta.length > 0 && (
+                  <p className="mt-1.5 text-[10px] font-semibold text-emerald-800/70">
+                    {proofMeta.join(" · ")}
+                  </p>
+                )}
+              </blockquote>
             )}
             {incident.gps && (
               <p className="mt-2 flex items-center gap-1.5 font-mono text-[11px] text-slate-500">
@@ -1324,6 +1401,60 @@ function IncidentDrawer({
                 : `Re-Route to ${rerouteTo}`}
             </button>
           </section>
+
+          {/* Ledger maintenance — the only irreversible action in the deck,
+              so it arms first and commits on the second click. */}
+          <section className="px-5 py-4">
+            <h3 className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+              <Trash2 className="h-3.5 w-3.5" />
+              Ledger
+            </h3>
+            {!confirmDelete ? (
+              <>
+                <p className="mt-2 text-[11px] leading-snug text-slate-500">
+                  Filed in error or a duplicate? Deleting removes the ticket
+                  along with the citizen&apos;s photo and the squad&apos;s proof
+                  photo.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setConfirmDelete(true)}
+                  className="mt-2 w-full rounded-xl border border-rose-200 bg-rose-50/60 px-4 py-2 text-xs font-bold text-rose-700 transition-colors duration-150 hover:bg-rose-100 focus:outline-none focus:ring-2 focus:ring-rose-500/20"
+                >
+                  Delete ticket {incident.id}
+                </button>
+              </>
+            ) : (
+              <div className="mt-2 rounded-xl border border-rose-200 bg-rose-50 p-3">
+                <p className="text-xs font-bold text-rose-800">
+                  Permanently delete {incident.id}?
+                </p>
+                <p className="mt-1 text-[11px] leading-snug text-rose-700/90">
+                  The ledger row and both evidence photos are destroyed. This
+                  cannot be undone.
+                </p>
+                <div className="mt-2.5 grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setConfirmDelete(false)}
+                    disabled={deleting}
+                    className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition-colors duration-150 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-emerald-700/20 disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={remove}
+                    disabled={deleting}
+                    className="flex items-center justify-center gap-1.5 rounded-xl bg-rose-600 px-3 py-2 text-xs font-bold text-white transition-colors duration-150 hover:bg-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-500/30 disabled:cursor-progress disabled:opacity-70"
+                  >
+                    <Trash2 className="h-3.5 w-3.5 shrink-0" />
+                    {deleting ? "Deleting…" : "Delete permanently"}
+                  </button>
+                </div>
+              </div>
+            )}
+          </section>
         </div>
 
         {/* Sticky action bar — always visible, no scrolling to act */}
@@ -1377,7 +1508,128 @@ function IncidentDrawer({
           </a>
         </footer>
       </aside>
+
+      {/* Evidence lightbox — the tiles are 4:3 thumbnails; a dispatcher
+          judges a repair from the full frame. z-[60] keeps it above the
+          drawer (z-50) and its backdrop (z-40). */}
+      {zoom && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={zoom.label}
+          onClick={() => setZoom(null)}
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/85 p-4 backdrop-blur-sm"
+        >
+          <figure
+            className="w-full max-w-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="relative aspect-[4/3] w-full overflow-hidden rounded-2xl bg-slate-900 ring-1 ring-white/20">
+              {/* eslint-disable-next-line @next/next/no-img-element -- Cloudinary-hosted evidence; next/image needs its domain configured. */}
+              <img
+                src={zoom.src}
+                alt={zoom.label}
+                className="absolute inset-0 h-full w-full object-contain"
+              />
+            </div>
+            <figcaption className="mt-3 flex items-center justify-between gap-3">
+              <span className="min-w-0 truncate text-xs font-semibold text-slate-200">
+                {zoom.label}
+              </span>
+              <button
+                type="button"
+                onClick={() => setZoom(null)}
+                aria-label="Close photo"
+                className="shrink-0 rounded-xl bg-white/10 p-2 text-white transition-colors duration-150 hover:bg-white/20 focus:outline-none focus:ring-2 focus:ring-emerald-700/40"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </figcaption>
+          </figure>
+        </div>
+      )}
     </>
+  );
+}
+
+/* ------------------------------ Evidence tile ------------------------------- */
+
+/** One half of the before/after pair. `angle` drives the styling; the empty
+    "after" is a dashed prompt, the empty "before" a tinted camera block. */
+function EvidenceTile({
+  angle,
+  src,
+  label,
+  emptyLabel,
+  tint,
+  onZoom,
+}: {
+  angle: "before" | "after";
+  src?: string;
+  label: string;
+  emptyLabel: string;
+  tint?: string;
+  onZoom: (photo: { src: string; label: string }) => void;
+}) {
+  const isAfter = angle === "after";
+  return (
+    <figure className="min-w-0">
+      <button
+        type="button"
+        aria-label={src ? `Zoom ${label}` : label}
+        disabled={!src}
+        onClick={() => src && onZoom({ src, label })}
+        className={`group relative block aspect-[4/3] w-full overflow-hidden rounded-xl ${
+          src
+            ? "cursor-zoom-in ring-1 ring-slate-200 transition-shadow duration-150 hover:ring-2 hover:ring-emerald-500"
+            : isAfter
+              ? "cursor-default border-2 border-dashed border-emerald-200 bg-emerald-50/40"
+              : `bg-gradient-to-br ${tint ?? "from-slate-400 to-slate-700"}`
+        }`}
+      >
+        {src ? (
+          // eslint-disable-next-line @next/next/no-img-element -- Cloudinary-hosted evidence; next/image needs its domain configured.
+          <img
+            src={src}
+            alt={label}
+            className="absolute inset-0 h-full w-full object-cover transition-transform duration-200 group-hover:scale-105"
+          />
+        ) : (
+          <span className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 px-2 text-center">
+            {isAfter ? (
+              <ShieldCheck className="h-5 w-5 shrink-0 text-emerald-300" />
+            ) : (
+              <Camera className="h-5 w-5 shrink-0 text-white/60" />
+            )}
+            <span
+              className={`text-[9px] font-semibold leading-3 ${
+                isAfter ? "text-emerald-700/70" : "text-white/85"
+              }`}
+            >
+              {emptyLabel}
+            </span>
+          </span>
+        )}
+        {src && (
+          <Maximize2
+            aria-hidden
+            className="absolute right-1.5 top-1.5 h-3.5 w-3.5 text-white/90 drop-shadow"
+          />
+        )}
+      </button>
+      <figcaption
+        className={`mt-1.5 flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide ${
+          isAfter ? "text-emerald-700" : "text-slate-500"
+        }`}
+      >
+        {isAfter ? (
+          <ShieldCheck className="h-2.5 w-2.5 shrink-0" />
+        ) : (
+          <Camera className="h-2.5 w-2.5 shrink-0" />
+        )}
+        {isAfter ? "After • Crew proof" : "Before • Citizen"}
+      </figcaption>
+    </figure>
   );
 }
 

@@ -1,7 +1,10 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
+import { redirect } from "next/navigation";
 import UnifiedCitizenAuth from "@/components/auth/UnifiedCitizenAuth";
 import { UserProvider } from "@/context/UserContext";
+import { verifySession } from "@/lib/auth/session";
+import { safeReturnPath } from "@/lib/auth/returnPath";
 
 export const metadata: Metadata = {
   title: "Sada-e-Awam • صدائے عوام | Citizen Sign In",
@@ -38,7 +41,19 @@ function AuthFallback() {
   );
 }
 
-export default function AuthPage() {
+export default async function AuthPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ redirect?: string }>;
+}) {
+  // A citizen with a live session has nothing to sign in to. Proxy only skips
+  // this for a cookie it cannot verify, so the check happens here — and the
+  // ?redirect target still wins, so a stale sign-in tab lands in the wizard.
+  if (await verifySession()) {
+    const { redirect: target } = await searchParams;
+    redirect(safeReturnPath(target));
+  }
+
   // Own UserProvider locally: /auth sits outside the (public) layout, and the
   // card writes the authenticated identity into the citizen document.
   return (

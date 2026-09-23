@@ -239,18 +239,18 @@ function TrackPageInner() {
     window.history.replaceState(null, "", "/track");
   };
 
-  /* Most recent submission — the newest ledger report attributed to this
-     citizen's phone. The backend is the only source; nothing device-cached
-     is ever surfaced. */
+  /* Most recent submission — the newest ledger report filed by this account.
+     Attribution is the account id (server-stamped at filing), not the contact
+     number, so a ticket carrying someone else's phone still reads as theirs. */
   const latest = useMemo(() => {
     const mine = (reports ?? [])
-      .filter((r) => r.citizen_phone === profile.phone)
+      .filter((r) => r.user_id === profile.id)
       .sort(
         (a, b) =>
           new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
       );
     return mine[0] ?? null;
-  }, [reports, profile.phone]);
+  }, [reports, profile.id]);
   const latestResolved = latest ? latest.status === "resolved" : false;
 
   /* ------------------------------ Result view ----------------------------- */
@@ -1352,15 +1352,24 @@ function DossierView({ dossier }: { dossier: TrackDossier }) {
             <div
               className={`relative aspect-[4/3] w-full overflow-hidden rounded-2xl bg-gradient-to-br ${expanded.gradient} ring-1 ring-white/20`}
             >
-              <expanded.icon
-                className="absolute left-1/2 top-1/2 h-24 w-24 -translate-x-1/2 -translate-y-1/2 text-white/70"
-                strokeWidth={1.25}
-              />
+              {expanded.src ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={expanded.src}
+                  alt={expanded.caption}
+                  className="absolute inset-0 h-full w-full bg-slate-950 object-contain"
+                />
+              ) : (
+                <expanded.icon
+                  className="absolute left-1/2 top-1/2 h-24 w-24 -translate-x-1/2 -translate-y-1/2 text-white/70"
+                  strokeWidth={1.25}
+                />
+              )}
               <span className="absolute bottom-0 left-0 right-0 bg-slate-950/45 px-4 py-2.5 text-xs font-semibold text-white">
                 {expanded.label}
               </span>
             </div>
-            <figcaption className="mt-3 flex items-center justify-between gap-3">
+            <div className="mt-3 flex items-start justify-between gap-3">
               <span className="text-xs leading-5 text-slate-200">
                 {expanded.stamp && (
                   <span className="mb-0.5 block text-[10px] font-bold uppercase tracking-wider text-emerald-300">
@@ -1369,8 +1378,8 @@ function DossierView({ dossier }: { dossier: TrackDossier }) {
                 )}
                 {expanded.caption}
                 <span className="mt-0.5 block text-[11px] text-slate-400">
-                  Original EXIF &amp; geotag retained in the municipal audit
-                  log.
+                  {expanded.footnote ??
+                    "Original EXIF & geotag retained in the municipal audit log."}
                 </span>
               </span>
               <button
@@ -1381,7 +1390,21 @@ function DossierView({ dossier }: { dossier: TrackDossier }) {
               >
                 <X className="h-4 w-4" />
               </button>
-            </figcaption>
+            </div>
+            {expanded.details && expanded.details.length > 0 && (
+              <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 rounded-2xl bg-white/5 p-3.5 sm:grid-cols-3">
+                {expanded.details.map((detail) => (
+                  <div key={detail.label} className="min-w-0">
+                    <dt className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                      {detail.label}
+                    </dt>
+                    <dd className="truncate text-[11px] font-semibold text-slate-100">
+                      {detail.value}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            )}
           </figure>
         </div>
       )}

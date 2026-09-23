@@ -310,13 +310,13 @@ Content-Type: application/json
 const AUDIT_ROWS: Array<[string, string, string]> = [
   [
     "Incident ledger",
-    "Neon Postgres ledger — read/appended/updated by GET/POST/PATCH in src/app/api/reports/route.ts",
-    "500-row cap, newest-first; every write rewrites the entire file",
+    "Neon Postgres ledger — GET/POST/PATCH/DELETE in src/app/api/reports/route.ts",
+    "500-row cap, newest-first; evidence photos live in Cloudinary and are destroyed when a ticket is deleted or its photo replaced",
   ],
   [
     "Citizen profile & identity",
-    "Neon app_state citizen-profile document (React UserContext)",
-    "Per-device only; dies with browser data; migrates legacy sada_citizen_settings",
+    "Neon citizen_users row behind /api/auth/me — identity columns (incl. avatar_url) + a settings JSONB document",
+    "Email ownership still unproven (email_verified false); profile survives a cleared browser",
   ],
   [
     "Admin identity",
@@ -350,8 +350,8 @@ const AUDIT_ROWS: Array<[string, string, string]> = [
   ],
   [
     "Sessions",
-    "None. /admin is URL-obscure; /api/reports PATCH accepts any caller",
-    "No tokens, no signatures, no authorization — full spoof surface",
+    "Citizens: httpOnly cookie + revocable citizen_sessions row (scrypt-verified sign-in). Admin console: none — /admin is URL-obscure and /api/reports PATCH accepts any caller",
+    "Citizen filing is closed; the operational consoles still have no authorization layer",
   ],
 ];
 
@@ -362,7 +362,7 @@ const RACES_ROWS: Array<[string, string]> = [
   ],
   [
     "Data loss & cache eviction",
-    "One cleared browser (or an Android WebView's isolated storage) deletes a citizen's profile, filing history and residency anchor. Nothing syncs across phone ↔ laptop. iOS Safari can evict localStorage under memory pressure without warning.",
+    "A citizen's account, profile and filing history live in Neon and survive any browser. What is still device-local — and lost on a cleared browser or an iOS Safari eviction: the detected-city and coverage caches, plus an unfinished wizard, since a report mid-flow has no draft store.",
   ],
   [
     "Lost-update race",

@@ -23,6 +23,7 @@ import {
   Landmark,
 } from "lucide-react";
 import { getAdminInitials, useAdminProfile } from "@/lib/adminProfileStore";
+import { fetchLedger } from "@/lib/ledgerClient";
 import { formatInt } from "@/utils/format";
 import { ConsoleNavContext, type ConsoleNav } from "./consoleContext";
 
@@ -213,14 +214,9 @@ export default function AdminLayout({
   useEffect(() => {
     let cancelled = false;
     const sync = () =>
-      fetch("/api/reports", { cache: "no-store" })
-        .then((res) =>
-          res.ok
-            ? res.json()
-            : Promise.reject(new Error(`HTTP ${res.status}`))
-        )
-        .then((data: unknown) => {
-          if (!cancelled) setReportCount(Array.isArray(data) ? data.length : 0);
+      fetchLedger()
+        .then((reports) => {
+          if (!cancelled) setReportCount(reports.length);
         })
         .catch(() => {
           // Sync failed — keep the last known count rather than blanking a
@@ -333,8 +329,12 @@ export default function AdminLayout({
                     />
                   )}
                   <div className="relative">
+                    {/* All eight routes sit in the viewport at once, so the
+                        default prefetch rendered every deck before this
+                        page's own data could arrive. */}
                     <Link
                       href={item.href}
+                      prefetch={false}
                       onClick={() => setMobileNavOpen(false)}
                       aria-current={active ? "page" : undefined}
                       aria-label={item.label}
@@ -428,6 +428,7 @@ export default function AdminLayout({
               {!railCollapsed && (
                 <Link
                   href="/admin/settings"
+                  prefetch={false}
                   aria-label="System Preferences"
                   aria-current={isSettingsRoute ? "page" : undefined}
                   className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition-all duration-200 ease-out active:scale-95 motion-reduce:transition-none motion-reduce:active:scale-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700/40 ${
@@ -444,6 +445,7 @@ export default function AdminLayout({
             {railCollapsed && (
               <Link
                 href="/admin/settings"
+                prefetch={false}
                 aria-label="System Preferences"
                 aria-current={isSettingsRoute ? "page" : undefined}
                 className={`group relative mx-auto flex h-9 w-9 items-center justify-center rounded-xl border transition-all duration-200 ease-out active:scale-95 motion-reduce:transition-none motion-reduce:active:scale-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700/40 ${
@@ -481,7 +483,7 @@ export default function AdminLayout({
               </button>
               <div className="min-w-0">
                 <p className="flex items-center gap-1.5 text-[11px] font-medium text-slate-400">
-                  <Link href="/" className="hover:text-emerald-700">
+                  <Link href="/" prefetch={false} className="hover:text-emerald-700">
                     Admin Console
                   </Link>
                   <span aria-hidden>/</span>

@@ -96,6 +96,7 @@ const PUBLIC_ROUTES: RouteEntry[] = [
       "Deep-link pre-fill from category cards, agency CTAs and city launcher",
       "Canvas-downscaled photo evidence (localStorage-safe data URLs)",
       "POST /api/reports — stored directly in the Neon ledger",
+      "Sign-in gated: /report and POST both require a verified session",
     ],
   },
   {
@@ -130,6 +131,22 @@ const AGENCY_ROUTES: RouteEntry[] = [
 
 const CITIZEN_ROUTES: RouteEntry[] = [
   {
+    href: "/auth",
+    name: "Citizen Sign In / Sign Up",
+    urdu: "لاگ ان",
+    desc: "One card for both paths: create an account with a password, or sign in with an existing email or mobile number.",
+    tone: "live",
+    toneLabel: "Real credentials",
+    params: ["?redirect=", "?mode=signup"],
+    features: [
+      "POST /api/auth/signup · /api/auth/signin — scrypt-verified against citizen_users",
+      "POST /api/auth/avatar — portrait to Cloudinary, its URL on citizen_users",
+      "httpOnly session cookie backed by a revocable citizen_sessions row",
+      "?redirect= returns the citizen to the wizard view they were stopped at",
+    ],
+    note: "Email ownership is still unproven — email_verified stays false until a mail provider is wired.",
+  },
+  {
     href: "/settings?tab=reports",
     name: "My Reports",
     desc: "The citizen's filing cabinet inside Account & Settings — every filed report with filters, search and work-order dossiers.",
@@ -139,7 +156,7 @@ const CITIZEN_ROUTES: RouteEntry[] = [
       "“View Status Timeline” → /track?id={token}",
       "Contest Fix button (UI only — no handler yet)",
     ],
-    note: "Renders the live Neon ledger keyed to the signed-in citizen's phone.",
+    note: "Scoped to the signed-in account by /api/reports?mine=1 (user_id, not phone).",
   },
   {
     href: "/settings",
@@ -150,7 +167,7 @@ const CITIZEN_ROUTES: RouteEntry[] = [
     params: ["?tab="],
     features: [
       "Tabs: reports · profile · alerts · privacy · danger",
-      "Profile persisted to the Neon citizen-profile document via UserContext",
+      "Profile persisted to the signed-in citizen's Neon account row",
       "Every tab is deep-linkable for the header avatar menu",
     ],
   },
@@ -173,22 +190,26 @@ const API_METHODS = [
   {
     method: "GET",
     cls: "bg-emerald-100 text-emerald-900 ring-emerald-200",
-    desc: "Returns the full incident ledger (newest first) — feeds /track, triage and Field Dispatch.",
+    desc: "Returns the full incident ledger (newest first) — feeds /track, triage and Field Dispatch. ?mine=1 narrows it to the signed-in account's own filings.",
   },
   {
     method: "POST",
     cls: "bg-sky-100 text-sky-900 ring-sky-200",
-    desc: "Validated wizard submission → ticket #CITY-XXXX, status triage, SLA deadline stamped.",
+    desc: "Validated wizard submission → ticket #CITY-XXXX, status triage, SLA deadline stamped. Requires a session; the filer's name and user_id come from the cookie, never the body.",
   },
   {
     method: "PATCH",
     cls: "bg-amber-100 text-amber-900 ring-amber-200",
-    desc: "Validated status transition by id or tracking token; stamps/clears dispatched_at + assigned_unit.",
+    desc: "Validated status transition by id or tracking token; stamps/clears dispatched_at + assigned_unit. A resolution photo is only accepted with status=resolved, and the proof it replaces is deleted from Cloudinary.",
+  },
+  {
+    method: "DELETE",
+    cls: "bg-rose-100 text-rose-900 ring-rose-200",
+    desc: "?id=TICKET removes the ledger row and destroys both evidence photos with it — the dossier's delete action.",
   },
 ];
 
 const LOCAL_STORES = [
-  { key: "sada_auth_session", note: "Signed-in session token (client credential — data itself lives in Neon)." },
   { key: "sada_detected_city", note: "Sub-24h cache of the landing page's city geodetection." },
 ];
 

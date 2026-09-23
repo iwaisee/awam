@@ -20,6 +20,11 @@ export type TriageIncident = Omit<RadarIncident, "statusTone"> & {
   /** Citizen-written headline + submitted photo from the wizard. */
   title?: string;
   photoUrl?: string;
+  /** Squad proof-of-work filed on resolution — the "after" half of the pair. */
+  afterPhotoUrl?: string;
+  resolutionNotes?: string;
+  resolvedAt?: string;
+  assignedUnit?: string;
 };
 
 const STATUS_PRESENTATION: Record<string, { label: string; tone: TriageTone }> = {
@@ -67,6 +72,10 @@ export function reportToIncident(report: IncidentReport): TriageIncident {
     slaDeadline: report.sla_deadline,
     title: report.title,
     photoUrl: report.photo_url,
+    afterPhotoUrl: report.after_photo_url,
+    resolutionNotes: report.resolution_notes,
+    resolvedAt: report.resolved_at,
+    assignedUnit: report.assigned_unit,
     photoTint: "from-emerald-500 to-emerald-900",
     gps: report.coordinates
       ? `${report.coordinates.lat.toFixed(4)}° N, ${report.coordinates.lng.toFixed(4)}° E (±${Math.round(report.geo_verification?.accuracy_meters ?? 8)}m)`

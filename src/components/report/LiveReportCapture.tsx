@@ -150,10 +150,53 @@ const PK_TIME_FMT = new Intl.DateTimeFormat("en-GB", {
 const MONO_FONT = 'ui-monospace, "SF Mono", Menlo, Consolas, monospace';
 const UI_FONT = '"Noto Sans Arabic", ui-sans-serif, system-ui, sans-serif';
 
+/** Measure `text` at `font(size)` and report its rendered width. */
+function textWidth(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  font: (size: number) => string,
+  size: number
+): number {
+  ctx.font = font(size);
+  return ctx.measureText(text).width;
+}
+
+/** Largest size at or below `start` at which `text` still fits `maxWidth`.
+    Floors at 9px — past that the stamp is unreadable either way. */
+function fitSize(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  font: (size: number) => string,
+  start: number,
+  maxWidth: number
+): number {
+  let size = Math.max(9, start);
+  ctx.font = font(size);
+  while (size > 9 && ctx.measureText(text).width > maxWidth) {
+    size -= 1;
+    ctx.font = font(size);
+  }
+  return size;
+}
+
+interface StampItem {
+  text: string;
+  size: number;
+  font: (size: number) => string;
+  color: string;
+  align: "left" | "right";
+}
+
 /** Burn the permanent verification band into the bottom of the frame: a
     dark gradient scrim carrying the verified seal (logo), bilingual title,
     raw coordinates with accuracy, PKT date/time, locality, and the short
-    payload ID. Runs at sensor resolution so the badge stays crisp. */
+    payload ID. Runs at sensor resolution so the badge stays crisp.
+
+    Type size keys off the *short* edge, not the height — a portrait phone
+    frame is tall and narrow, and a height-driven size overflows the width
+    and collides the left and right columns. Each line is measured, and when
+    the two-column pairing cannot fit the band falls back to a stacked
+    single-column layout. */
 async function drawVerificationBand(
   ctx: CanvasRenderingContext2D,
   width: number,
@@ -162,14 +205,123 @@ async function drawVerificationBand(
   locality: string,
   capturedAt: string
 ): Promise<void> {
-  const unit = Math.max(12, Math.round(height * 0.021));
-  let titleSize = Math.round(unit * 1.15);
+  const short = Math.min(width, height);
+  const unit = Math.min(26, Math.max(11, Math.round(short * 0.019)));
+  const pad = Math.min(36, Math.max(12, Math.round(short * 0.028)));
+  const colGap = Math.round(unit * 0.9);
+  const lineH = Math.round(unit * 1.5);
+  const contentWidth = width - pad * 2;
+
+  const title = "صدائے عوام • SADA-E-AWAM VERIFIED REPORT";
+  const stamp = `${PK_DATE_FMT.format(new Date(capturedAt))} • ${PK_TIME_FMT.format(new Date(capturedAt))} PKT`;
+  const gpsLine = `GPS: ${geo.latitude.toFixed(6)}, ${geo.longitude.toFixed(6)} (Accurate to ±${Math.round(geo.accuracyMeters)}m)`;
+  const locLine = `Locality: ${locality}`;
+
+  const uiBold = (s: number) => `bold ${s}px ${UI_FONT}`;
+  const monoBold = (s: number) => `bold ${s}px ${MONO_FONT}`;
+  const mono = (s: number) => `${s}px ${MONO_FONT}`;
+
+  const id = await payloadId(
+    geo.latitude,
+    geo.longitude,
+    geo.accuracyMeters,
+    capturedAt
+  );
   const hashSize = Math.max(9, Math.round(unit * 0.66));
-  const pad = Math.round(Math.max(12, height * 0.028));
-  const lineTitle = Math.round(titleSize * 1.5);
-  const lineTs = Math.round(unit * 1.5);
-  const hashRow = Math.round(hashSize * 1.7);
-  const contentH = lineTitle + lineTs + hashRow;
+
+  const sealR = Math.round(unit * 0.62);
+  const sealCx = pad + sealR;
+  const textX = sealCx + sealR + Math.round(unit * 0.7);
+  const sealBlock = textX - pad;
+
+  const titleTarget = Math.round(unit * 1.15);
+  const twoCol =
+    textWidth(ctx, title, uiBold, titleTarget) +
+      sealBlock +
+      colGap +
+      textWidth(ctx, stamp, monoBold, unit) <=
+      contentWidth &&
+    textWidth(ctx, gpsLine, mono, unit) +
+      colGap +
+      textWidth(ctx, locLine, mono, unit) <=
+      contentWidth;
+
+  const rows: StampItem[][] = twoCol
+    ? [
+        [
+          {
+            text: title,
+            size: titleTarget,
+            font: uiBold,
+            color: "rgba(255,255,255,0.97)",
+            align: "left",
+          },
+          {
+            text: stamp,
+            size: unit,
+            font: monoBold,
+            color: "rgba(255,255,255,0.95)",
+            align: "right",
+          },
+        ],
+        [
+          {
+            text: gpsLine,
+            size: unit,
+            font: mono,
+            color: "rgba(255,255,255,0.85)",
+            align: "left",
+          },
+          {
+            text: locLine,
+            size: unit,
+            font: mono,
+            color: "rgba(255,255,255,0.82)",
+            align: "right",
+          },
+        ],
+      ]
+    : [
+        [
+          {
+            text: title,
+            size: fitSize(ctx, title, uiBold, titleTarget, contentWidth - sealBlock),
+            font: uiBold,
+            color: "rgba(255,255,255,0.97)",
+            align: "left",
+          },
+        ],
+        [
+          {
+            text: stamp,
+            size: fitSize(ctx, stamp, monoBold, unit, contentWidth),
+            font: monoBold,
+            color: "rgba(255,255,255,0.95)",
+            align: "left",
+          },
+        ],
+        [
+          {
+            text: gpsLine,
+            size: fitSize(ctx, gpsLine, mono, unit, contentWidth),
+            font: mono,
+            color: "rgba(255,255,255,0.85)",
+            align: "left",
+          },
+        ],
+        [
+          {
+            text: locLine,
+            size: fitSize(ctx, locLine, mono, unit, contentWidth),
+            font: mono,
+            color: "rgba(255,255,255,0.82)",
+            align: "left",
+          },
+        ],
+      ];
+
+  const hashRow = id ? Math.round(hashSize * 1.7) : 0;
+  const contentH = lineH * rows.length + hashRow;
   const scrimTop = height - Math.round(contentH + pad * 1.9);
 
   /* Gradient dark scrim across the bottom of the frame. */
@@ -180,25 +332,12 @@ async function drawVerificationBand(
   ctx.fillStyle = scrim;
   ctx.fillRect(0, scrimTop, width, height - scrimTop);
 
-  /* Shrink the title if it would crowd the right-hand clock block. */
-  const title = "صدائے عوام • SADA-E-AWAM VERIFIED REPORT";
-  ctx.font = `bold ${titleSize}px ${UI_FONT}`;
-  while (
-    titleSize > 10 &&
-    ctx.measureText(title).width > width * 0.56
-  ) {
-    titleSize -= 1;
-    ctx.font = `bold ${titleSize}px ${UI_FONT}`;
-  }
-
   const hashBaseline = height - Math.round(pad * 0.55);
-  const bottomBaseline = hashBaseline - hashRow;
-  const topBaseline = bottomBaseline - lineTs;
+  const firstBaseline = hashBaseline - hashRow - lineH * (rows.length - 1);
 
-  /* Verified seal — emerald disc with a white check, left of the text. */
-  const sealR = Math.round(titleSize * 0.62);
-  const sealCx = pad + sealR;
-  const sealCy = (topBaseline + bottomBaseline) / 2 - Math.round(titleSize * 0.18);
+  /* Verified seal — emerald disc with a white check, left of the title row. */
+  const titleSize = rows[0][0].size;
+  const sealCy = firstBaseline - Math.round(titleSize * 0.36);
   ctx.fillStyle = "#10b981";
   ctx.beginPath();
   ctx.arc(sealCx, sealCy, sealR, 0, Math.PI * 2);
@@ -213,49 +352,30 @@ async function drawVerificationBand(
   ctx.lineTo(sealCx + sealR * 0.48, sealCy - sealR * 0.32);
   ctx.stroke();
 
-  const textX = sealCx + sealR + Math.round(unit * 0.7);
-
-  /* Left column — bilingual title over the raw GPS fix. */
-  ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
-  ctx.fillStyle = "rgba(255,255,255,0.97)";
-  ctx.font = `bold ${titleSize}px ${UI_FONT}`;
-  ctx.fillText(title, textX, topBaseline);
-  ctx.fillStyle = "rgba(255,255,255,0.85)";
-  ctx.font = `${unit}px ${MONO_FONT}`;
-  ctx.fillText(
-    `GPS: ${geo.latitude.toFixed(6)}, ${geo.longitude.toFixed(6)} (Accurate to ±${Math.round(geo.accuracyMeters)}m)`,
-    textX,
-    bottomBaseline
-  );
-
-  /* Right column — PKT timestamp over the reverse-looked-up locality. */
-  ctx.textAlign = "right";
-  ctx.fillStyle = "rgba(255,255,255,0.95)";
-  ctx.font = `bold ${unit}px ${MONO_FONT}`;
-  ctx.fillText(
-    `${PK_DATE_FMT.format(new Date(capturedAt))} • ${PK_TIME_FMT.format(new Date(capturedAt))} PKT`,
-    width - pad,
-    topBaseline
-  );
-  ctx.fillStyle = "rgba(255,255,255,0.82)";
-  ctx.font = `${unit}px ${MONO_FONT}`;
-  ctx.fillText(`Locality: ${locality}`, width - pad, bottomBaseline);
+  rows.forEach((items, index) => {
+    const baseline = firstBaseline + index * lineH;
+    items.forEach((item) => {
+      ctx.font = item.font(item.size);
+      ctx.fillStyle = item.color;
+      if (item.align === "right") {
+        ctx.textAlign = "right";
+        ctx.fillText(item.text, width - pad, baseline);
+      } else {
+        ctx.textAlign = "left";
+        ctx.fillText(item.text, index === 0 ? textX : pad, baseline);
+      }
+    });
+  });
 
   /* Payload ID — tamper-evidence anchor, centered on the band's bottom edge. */
-  const id = await payloadId(
-    geo.latitude,
-    geo.longitude,
-    geo.accuracyMeters,
-    capturedAt
-  );
   if (id) {
     ctx.textAlign = "center";
     ctx.fillStyle = "rgba(255,255,255,0.55)";
     ctx.font = `${hashSize}px ${MONO_FONT}`;
     ctx.fillText(`ID ${id}`, width / 2, hashBaseline);
-    ctx.textAlign = "left";
   }
+  ctx.textAlign = "left";
 }
 
 function TelemetryChip({
@@ -280,6 +400,37 @@ function TelemetryChip({
       {icon}
       {children}
     </span>
+  );
+}
+
+/** One labelled telemetry field in the review sheet — label over value so a
+    long coordinate string never collides with its neighbours on a narrow
+    phone screen the way the wrapping pill row did. */
+function DetailCell({
+  icon,
+  label,
+  value,
+  mono,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  return (
+    <div className="flex min-w-0 items-start gap-2 rounded-xl bg-white/[0.07] px-2.5 py-2">
+      <span className="mt-0.5 shrink-0 text-emerald-400">{icon}</span>
+      <span className="min-w-0">
+        <span className="block text-[10px] font-semibold uppercase tracking-wide text-white/50">
+          {label}
+        </span>
+        <span
+          className={`block truncate text-xs font-bold text-white ${mono ? "font-mono" : ""}`}
+        >
+          {value}
+        </span>
+      </span>
+    </div>
   );
 }
 
@@ -1002,47 +1153,70 @@ export default function LiveReportCapture({
                     <X className="h-5 w-5" />
                   </button>
                 </div>
-                <div className="flex min-h-0 flex-1 items-center justify-center px-3">
+                <div className="flex min-h-0 flex-1 items-center justify-center px-3 py-2">
                   <img
                     src={capture.previewUrl}
                     alt="Live captured incident evidence with verification stamp"
                     className="max-h-full max-w-full rounded-lg object-contain"
                   />
                 </div>
-                <div className="space-y-3 px-4 pb-6 pt-4">
-                  <div className="flex flex-wrap gap-1.5">
-                    <TelemetryChip icon={<MapPin className="h-3.5 w-3.5" />}>
-                      {formatCoords(capture.geo.latitude, capture.geo.longitude)}
-                    </TelemetryChip>
-                    <TelemetryChip icon={<MapPin className="h-3.5 w-3.5" />}>
-                      📍 {capture.locality}
-                    </TelemetryChip>
-                    <TelemetryChip icon={<Clock className="h-3.5 w-3.5" />}>
-                      Captured: Just now (Live)
-                    </TelemetryChip>
-                    <TelemetryChip
-                      tone="verified"
-                      icon={<ShieldCheck className="h-3.5 w-3.5" />}
-                    >
-                      Presence Verified: Citizen is on site
-                    </TelemetryChip>
-                  </div>
-                  {outsidePilot && (
-                    <p className="flex items-start gap-2 rounded-btn border border-warning/30 bg-warning-tint px-3 py-2.5 text-xs font-semibold leading-5 text-warning">
-                      <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
-                      Coordinates indicate you are outside Sialkot pilot
-                      boundaries. This report will be audited before dispatch.
+                {/* The details sheet is height-capped and scrolls on its own;
+                    unbounded, it crushed the portrait photo into a thumbnail
+                    on a phone. Actions stay pinned below it. */}
+                <div className="flex max-h-[54vh] shrink-0 flex-col sm:max-h-none">
+                  <div className="min-h-0 space-y-2.5 overflow-y-auto px-4 pb-1">
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <DetailCell
+                        icon={<MapPin className="h-3.5 w-3.5" />}
+                        label="Coordinates"
+                        value={formatCoords(
+                          capture.geo.latitude,
+                          capture.geo.longitude
+                        )}
+                        mono
+                      />
+                      <DetailCell
+                        icon={<LocateFixed className="h-3.5 w-3.5" />}
+                        label="GPS accuracy"
+                        value={`±${Math.round(capture.geo.accuracyMeters)}m`}
+                        mono
+                      />
+                      <DetailCell
+                        icon={<Navigation className="h-3.5 w-3.5" />}
+                        label="Locality"
+                        value={capture.locality}
+                      />
+                      <DetailCell
+                        icon={<Clock className="h-3.5 w-3.5" />}
+                        label="Captured (PKT)"
+                        value={formatPkClock(capture.capturedAt)}
+                        mono
+                      />
+                    </div>
+                    <p className="flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/15 px-2.5 py-2 text-[11px] font-bold text-emerald-300">
+                      <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
+                      Presence Verified — Citizen is on site
                     </p>
-                  )}
-                  <div className="overflow-hidden rounded-btn border border-white/15">
-                    <iframe
-                      title="Capture location on map"
-                      src={osmEmbedUrl(capture.geo.latitude, capture.geo.longitude)}
-                      className="h-36 w-full"
-                      loading="lazy"
-                    />
+                    {outsidePilot && (
+                      <p className="flex items-start gap-2 rounded-btn border border-warning/30 bg-warning-tint px-3 py-2.5 text-xs font-semibold leading-5 text-warning">
+                        <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+                        Coordinates indicate you are outside Sialkot pilot
+                        boundaries. This report will be audited before dispatch.
+                      </p>
+                    )}
+                    <div className="overflow-hidden rounded-btn border border-white/15">
+                      <iframe
+                        title="Capture location on map"
+                        src={osmEmbedUrl(
+                          capture.geo.latitude,
+                          capture.geo.longitude
+                        )}
+                        className="h-28 w-full sm:h-36"
+                        loading="lazy"
+                      />
+                    </div>
                   </div>
-                  <div className="flex flex-col gap-2 sm:flex-row">
+                  <div className="flex shrink-0 flex-col gap-2 px-4 pb-6 pt-3 sm:flex-row">
                     <button
                       type="button"
                       onClick={retake}
@@ -1155,11 +1329,12 @@ export default function LiveReportCapture({
                   </button>
                 </div>
 
-                {/* Subtle rounded viewport frame + center crosshair. */}
-                <div className="pointer-events-none absolute inset-2 rounded-3xl border-2 border-white/20" />
-                <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
-                  <div className="h-6 w-6 -translate-x-3 -translate-y-3 border-l-2 border-t-2 border-white/40" />
-                  <div className="h-6 w-6 translate-x-3 -translate-y-3 border-r-2 border-t-2 border-white/40" />
+                {/* Centered focus reticle — four corner brackets. */}
+                <div className="pointer-events-none absolute left-1/2 top-1/2 h-16 w-16 -translate-x-1/2 -translate-y-1/2">
+                  <span className="absolute left-0 top-0 h-4 w-4 border-l-2 border-t-2 border-white/50" />
+                  <span className="absolute right-0 top-0 h-4 w-4 border-r-2 border-t-2 border-white/50" />
+                  <span className="absolute bottom-0 left-0 h-4 w-4 border-b-2 border-l-2 border-white/50" />
+                  <span className="absolute bottom-0 right-0 h-4 w-4 border-b-2 border-r-2 border-white/50" />
                 </div>
 
                 {/* Bottom telemetry strip + shutter. */}

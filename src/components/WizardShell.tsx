@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { MapPin, Layers, Camera, ClipboardCheck, ChevronLeft, ChevronRight } from "lucide-react";
 import StepLocation from "@/components/StepLocation";
@@ -11,6 +11,7 @@ import StepConfirmation from "@/components/StepConfirmation";
 import { emptyReport } from "@/types/report";
 import type { ReportFormData } from "@/types/report";
 import { readDownscaledDataUrl } from "@/lib/imageDataUrl";
+import { signInHref } from "@/lib/auth/returnPath";
 import { useCoverage } from "@/context/CoverageContext";
 import {
   buildReportPayload,
@@ -73,25 +74,26 @@ export default function WizardShell({
   const [direction, setDirection] = useState<"forward" | "back">("forward");
   const router = useRouter();
   const { getReportableAreas, cities, categories, hydrated: coverageLoaded } = useCoverage();
-  const [formData, setFormData] = useState<ReportFormData>(() => ({
+  const [formDraft, setFormData] = useState<ReportFormData>(() => ({
     ...emptyReport,
     category: initialCategory,
     city: resolveCityParam(cities, initialCity),
   }));
 
-  /* Re-resolve the deep-linked district once the Neon roster arrives — the
-     initial state ran against an empty (pre-fetch) coverage tree. */
-  useEffect(() => {
-    if (!coverageLoaded) return;
-    setFormData((prev) =>
-      prev.city
-        ? prev
-        : { ...prev, city: resolveCityParam(cities, initialCity) }
-    );
-    // Runs when the roster first arrives; later roster edits must not
-    // rewrite the citizen's in-progress selection.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [coverageLoaded]);
+  /* The deep-linked district is resolved against the Neon roster, which arrives
+     a beat after mount — so the param is applied as a read-time fallback rather
+     than copied into state by an effect. `formDraft` is the citizen's own
+     answers; `formData` is what every step and the submit path act on. Once the
+     picker has been touched, its value (including a deliberate "Select a
+     city…") is the citizen's and the fallback stands down. */
+  const [cityTouched, setCityTouched] = useState(false);
+  const formData = useMemo<ReportFormData>(
+    () =>
+      cityTouched || formDraft.city
+        ? formDraft
+        : { ...formDraft, city: resolveCityParam(cities, initialCity) },
+    [cityTouched, formDraft, cities, initialCity]
+  );
   const [referenceId, setReferenceId] = useState("");
   const [submittedReport, setSubmittedReport] = useState<IncidentReport | null>(null);
   const [photoWarning, setPhotoWarning] = useState<string | null>(null);
@@ -103,6 +105,7 @@ export default function WizardShell({
     // choice (and its quick-issue pills), because the visible taxonomy
     // depends on city + jurisdiction.
     const locationChanged = "city" in patch || "area" in patch;
+    if ("city" in patch) setCityTouched(true);
     setFormData((prev) => ({
       ...prev,
       ...patch,
@@ -189,6 +192,14 @@ export default function WizardShell({
         error?: string;
         photo_warning?: string;
       };
+      if (response.status === 401) {
+        /* The session ended between the first step and this one (Proxy only
+           guards page loads). The ledger will not accept an anonymous filing,
+           so there is no point holding the citizen on a screen they cannot
+           submit from — send them to sign in and back. */
+        router.replace(signInHref("/report"));
+        return;
+      }
       if (!response.ok || !data.success || !data.ticket_id || !data.report) {
         throw new Error(data.error ?? `Server error (${response.status})`);
       }

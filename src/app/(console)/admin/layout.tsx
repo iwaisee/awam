@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { getAdminInitials, useAdminProfile } from "@/lib/adminProfileStore";
 import { fetchLedger } from "@/lib/ledgerClient";
+import AdminLogoutButton from "@/components/admin/AdminLogoutButton";
 import { formatInt } from "@/utils/format";
 import { ConsoleNavContext, type ConsoleNav } from "./consoleContext";
 
@@ -501,6 +502,7 @@ export default function AdminLayout({
                 <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
                 <span className="font-mono">{clock}</span> PKT
               </span>
+              <AdminLogoutButton />
             </div>
           </header>
 

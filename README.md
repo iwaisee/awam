@@ -25,7 +25,6 @@ Common tasks:
 ```bash
 npx neon link            # connect this repo to the Neon project (writes .neon)
 npx neon env pull        # refresh .env.local with the current branch's vars
-npm run migrate:neon     # import legacy local SQLite stores (data/*.db) into Neon — idempotent
 npm run migrate:tables   # unpack legacy JSON docs (coverage/registry) into the normalized tables — idempotent, needs dev server running
 ```
 

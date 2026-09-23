@@ -8,7 +8,6 @@
     "start": "next start",
     "lint": "eslint",
     "postinstall": "prisma generate",
-    "migrate:neon": "node scripts/migrate-sqlite-to-neon.mjs",
     "migrate:tables": "node scripts/migrate-json-to-tables.mjs"
   },
   "dependencies": {

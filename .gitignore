@@ -41,8 +41,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# runtime sqlite stores (root only — src/data holds committed seed modules)
-# /data/
+# neon project link
 .neon
 
 /src/generated/prisma

@@ -161,8 +161,10 @@ export default function UnifiedCitizenAuth() {
   const [toast, setToast] = useState<string | null>(null);
 
   const navigateTimer = useRef<number | null>(null);
+  const fallbackTimer = useRef<number | null>(null);
   useEffect(() => () => {
     if (navigateTimer.current !== null) window.clearTimeout(navigateTimer.current);
+    if (fallbackTimer.current !== null) window.clearTimeout(fallbackTimer.current);
   }, []);
 
   // Read once post-mount, deferred in a microtask to satisfy the
@@ -224,7 +226,14 @@ export default function UnifiedCitizenAuth() {
 
   /** Post-auth handoff: the cookie is already set by the response, so the only
       thing left is to land the citizen where they were headed. UserContext
-      re-reads /api/auth/me on that navigation and the whole portal follows. */
+      re-reads /api/auth/me on that navigation and the whole portal follows.
+
+      The router.replace runs once the toast has drawn; if that client-side
+      navigation is dropped (a stalled RSC fetch leaves this card on screen —
+      the welcome toast shows but the URL never moves), a full-page navigation
+      takes over: the server re-verifies the fresh session cookie and lands the
+      citizen itself. Cleared on unmount, so a committed navigation never
+      double-fires. */
   const finishAuth = useCallback(
     (displayName: string) => {
       setToast(`Welcome, ${displayName}.`);
@@ -232,6 +241,11 @@ export default function UnifiedCitizenAuth() {
         () => router.replace(redirectUrl),
         400
       );
+      fallbackTimer.current = window.setTimeout(() => {
+        if (window.location.pathname === "/auth") {
+          window.location.assign(redirectUrl);
+        }
+      }, 3500);
     },
     [redirectUrl, router]
   );

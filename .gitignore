@@ -44,4 +44,7 @@ next-env.d.ts
 # neon project link
 .neon
 
+# browser QA captures — local artifacts, not source
+/gui-test-screenshots
+
 /src/generated/prisma

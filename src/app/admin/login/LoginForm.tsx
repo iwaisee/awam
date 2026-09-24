@@ -236,7 +236,6 @@ export default function LoginForm({ redirect }: { redirect: string | null }) {
                     type="email"
                     required
                     autoComplete="username"
-                    defaultValue="dg.localgovt@punjab.gov.pk"
                     placeholder="officer@punjab.gov.pk"
                     className="h-12 w-full rounded-xl border border-white/10 bg-white/[0.04] pl-11 pr-3 text-sm text-slate-100 outline-none transition-all duration-200 placeholder:text-slate-600 hover:border-white/[0.16] focus:border-emerald-400/50 focus:bg-white/[0.06] focus:ring-4 focus:ring-emerald-400/10"
                   />

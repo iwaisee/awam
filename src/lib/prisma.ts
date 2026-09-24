@@ -14,7 +14,13 @@ declare global {
 }
 
 export const prisma: PrismaClient =
-  globalThis.__sadaPrisma ?? new PrismaClient({ adapter: new PrismaPg(getPool()) });
+  globalThis.__sadaPrisma ??
+  new PrismaClient({
+    /* pg.ts hands out the Neon serverless pool (wire protocol over WebSocket).
+       It is API-compatible with node-postgres at runtime (query/connect/end),
+       but not nominally typed as pg.Pool, so the adapter seam is cast. */
+    adapter: new PrismaPg(getPool() as unknown as ConstructorParameters<typeof PrismaPg>[0]),
+  });
 
 if (process.env.NODE_ENV !== "production") {
   globalThis.__sadaPrisma = prisma;

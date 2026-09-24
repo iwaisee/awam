@@ -1,7 +1,8 @@
-/* Seed the Admin Console's provincial leadership master account.
+/* Seed the Admin Console: schema, then the provincial leadership master account.
 
-   Applies db/migrations/2026-09-23-admin-rbac.sql (idempotent DDL + index
-   + upsert) against the Neon database named by DATABASE_URL.
+   Applies every db/migrations/*.sql in filename order (all of them are
+   idempotent, so re-running is safe) against the Neon database named by
+   DATABASE_URL.
 
      npm run seed:admin                       # schema + roster upsert
      npm run seed:admin -- --reset-password   # also reset the password hash
@@ -10,17 +11,18 @@
    cannot clobber a rotated credential; --reset-password exists for handing a
    drifted account back to the documented default. */
 
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { Pool } from "pg";
+// Neon serverless driver: the Postgres wire protocol over WebSocket (443),
+// so the seed works on networks that block raw TCP 5432.
+import { Pool } from "@neondatabase/serverless";
 
-const MIGRATION_PATH = path.join(
+const MIGRATIONS_DIR = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
   "db",
   "migrations",
-  "2026-09-23-admin-rbac.sql",
 );
 
 const SEED_EMAIL = "dg.localgovt@punjab.gov.pk";
@@ -37,16 +39,16 @@ if (!databaseUrl) {
   process.exit(1);
 }
 
-const sql = await readFile(MIGRATION_PATH, "utf8");
-const isLocal = /(?:localhost|127\.0\.0\.1)/.test(databaseUrl);
-const pool = new Pool({
-  connectionString: databaseUrl,
-  // Neon endpoints require TLS; local Postgres does not.
-  ...(isLocal ? {} : { ssl: true }),
-});
+const migrationFiles = (await readdir(MIGRATIONS_DIR))
+  .filter((file) => file.endsWith(".sql"))
+  .sort();
+const pool = new Pool({ connectionString: databaseUrl });
 
 try {
-  await pool.query(sql);
+  for (const file of migrationFiles) {
+    await pool.query(await readFile(path.join(MIGRATIONS_DIR, file), "utf8"));
+    console.log(`Applied ${file}`);
+  }
   if (resetPassword) {
     await pool.query(
       `UPDATE users SET password_hash = $1, updated_at = now()

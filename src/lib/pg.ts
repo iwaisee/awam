@@ -1,14 +1,21 @@
-import { Pool, type QueryResultRow } from "pg";
+import { Pool } from "@neondatabase/serverless";
+import type { QueryResultRow } from "pg";
 
 /* Shared Neon (Postgres) access — one pooled client for the whole console.
    The connection string comes from DATABASE_URL (pooled "-pooler" URL is the
    right one for app traffic; Neon writes it into .env via `neon env pull`).
    The pool is cached on globalThis so dev hot-reloads reuse the same handles,
-   and the schema is ensured exactly once per process. */
+   and the schema is ensured exactly once per process.
+
+   Driver: @neondatabase/serverless speaks the Postgres wire protocol over
+   WebSocket (port 443) rather than raw TCP 5432, which corporate and campus
+   networks routinely block. The API matches node-postgres (query/connect/
+   end), so call sites are unchanged. */
 
 declare global {
   var __sadaPgPool: Pool | undefined;
   var __sadaPgSchema: { ddl: string; promise: Promise<void> } | undefined;
+  var __sadaPgKeepalive: ReturnType<typeof setInterval> | undefined;
 }
 
 function createPool(): Pool {
@@ -18,14 +25,34 @@ function createPool(): Pool {
       "DATABASE_URL is not set — link the Neon project and run `neon env pull` (or copy the pooled connection string into .env).",
     );
   }
-  const isLocal = /(?:localhost|127\.0\.0\.1)/.test(url);
-  return new Pool({
+  const pool = new Pool({
     connectionString: url,
     max: 5,
-    // Neon endpoints require TLS with full certificate verification; local
-    // Postgres does not.
-    ...(isLocal ? {} : { ssl: true }),
   });
+
+  /* Neon's pooler reaps WebSocket connections after a few idle minutes. A
+     reaped socket costs a fresh ~1.3s handshake on the next query, and the
+     dying socket can surface as an unhandled ErrorEvent — both land as
+     multi-second stalls that make client-router navigations (e.g. the
+     post-login redirect) silently abort. A light ping every 4 minutes keeps
+     the sockets legitimately open; a warm socket answers in single-digit ms. */
+  if (globalThis.__sadaPgKeepalive) clearInterval(globalThis.__sadaPgKeepalive);
+  globalThis.__sadaPgKeepalive = setInterval(
+    () => void pool.query("SELECT 1").catch(() => undefined),
+    4 * 60 * 1000,
+  );
+  globalThis.__sadaPgKeepalive.unref?.();
+
+  /* Idle-socket errors arrive with no query attached and would otherwise
+     bubble as uncaughtExceptions; the pool reconnects on the next query. */
+  pool.on("error", (error: unknown) => {
+    console.error(
+      "[pg] pool client error (pool reconnects on next query)",
+      error instanceof Error ? error.message : error,
+    );
+  });
+
+  return pool;
 }
 
 export function getPool(): Pool {

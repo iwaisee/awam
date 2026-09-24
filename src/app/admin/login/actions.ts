@@ -80,7 +80,7 @@ export async function adminLoginAction(
     }
 
     /* The session row is the clearance record: role and department are read
-       back from `users` on every request, never carried in the cookie. */
+       back from `admin_users` on every request, never carried in the cookie. */
     await startAdminSession(user);
   } catch (error) {
     console.error("[admin-auth] login failed", error);

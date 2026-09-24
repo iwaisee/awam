@@ -9,8 +9,8 @@ import { neon } from "@neondatabase/serverless";
    template; no SQL is ever concatenated.
 
    Schema bootstrap is idempotent and cached per process, mirroring the
-   ensureSchema() pattern: a fresh Neon branch gets the `users` table, its
-   indexes and the seeded master account on the first login attempt. The
+   ensureSchema() pattern: a fresh Neon branch gets the `admin_users` table,
+   its indexes and the seeded master account on the first login attempt. The
    canonical DDL + seed live in db/migrations/2026-09-23-admin-rbac.sql
    (apply via `npm run seed:admin`); the seed upsert refreshes roster metadata
    but never overwrites a rotated password hash. */
@@ -48,7 +48,7 @@ export function ensureAdminSchema(): Promise<void> {
   globalThis.__sadaAdminBootstrap ??= (async () => {
     const sql = adminSql();
     await sql`
-      CREATE TABLE IF NOT EXISTS users (
+      CREATE TABLE IF NOT EXISTS admin_users (
         id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
         full_name TEXT NOT NULL DEFAULT '',
         email TEXT NOT NULL,
@@ -60,10 +60,10 @@ export function ensureAdminSchema(): Promise<void> {
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )
     `;
-    await sql`CREATE INDEX IF NOT EXISTS idx_users_role_email ON users(email, role)`;
-    await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_unique ON users(LOWER(email))`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_admin_users_role_email ON admin_users(email, role)`;
+    await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_users_email_unique ON admin_users(LOWER(email))`;
     await sql`
-      INSERT INTO users (full_name, email, password_hash, role, department, designation)
+      INSERT INTO admin_users (full_name, email, password_hash, role, department, designation)
       VALUES (
         'Director General (DG) Local Govt',
         'dg.localgovt@punjab.gov.pk',
@@ -82,7 +82,7 @@ export function ensureAdminSchema(): Promise<void> {
     await sql`
       CREATE TABLE IF NOT EXISTS admin_sessions (
         token_hash TEXT PRIMARY KEY,
-        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        user_id TEXT NOT NULL REFERENCES admin_users(id) ON DELETE CASCADE,
         expires_at TIMESTAMPTZ NOT NULL
       )
     `;
@@ -102,7 +102,7 @@ export async function getAdminUserByEmail(
   await ensureAdminSchema();
   const rows = (await adminSql()`
     SELECT id, full_name, email, password_hash, role, department
-      FROM users
+      FROM admin_users
      WHERE LOWER(email) = LOWER(${email})
      LIMIT 1
   `) as AdminUserRow[];
@@ -117,7 +117,7 @@ export async function getAdminUserById(
   await ensureAdminSchema();
   const rows = (await adminSql()`
     SELECT id, full_name, email, password_hash, role, department
-      FROM users
+      FROM admin_users
      WHERE id = ${id}
      LIMIT 1
   `) as AdminUserRow[];

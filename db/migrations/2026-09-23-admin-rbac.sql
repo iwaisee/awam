@@ -2,12 +2,15 @@
 -- Sada-e-Awam — Admin RBAC schema patch (2026-09-23)
 -- Neon PostgreSQL. Fully idempotent: safe to re-run on any environment.
 --
--- Standalone `users` table for the Admin Console. Deliberately separate from
--- `citizen_users`: citizens sign in by mobile number into database-backed
+-- Standalone `admin_users` table for the Admin Console. Deliberately separate
+-- from `citizen_users`: citizens sign in by mobile number into database-backed
 -- session rows; officers sign in by official government email + bcrypt
 -- password into their own session rows (2026-09-24-admin-sessions.sql), held
 -- as an httpOnly cookie scoped to /admin. The two identity stores share
 -- nothing.
+--
+-- This table was originally named `users`; 2026-09-24-admin-rename-users-table.sql
+-- carries an existing environment over to the new name.
 --
 -- Apply with:  npm run seed:admin
 -- ============================================================================
@@ -15,7 +18,7 @@
 -- ---------------------------------------------------------------------------
 -- 1. Table (CREATE IF NOT EXISTS keeps brand-new and existing branches equal)
 -- ---------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS users (
+CREATE TABLE IF NOT EXISTS admin_users (
   id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
   full_name TEXT NOT NULL DEFAULT '',
   email TEXT NOT NULL,
@@ -27,19 +30,19 @@ CREATE TABLE IF NOT EXISTS users (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Legacy deployments whose `users` table predates RBAC.
-ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(30) NOT NULL DEFAULT 'citizen';
-ALTER TABLE users ADD COLUMN IF NOT EXISTS department VARCHAR(100);
-ALTER TABLE users ADD COLUMN IF NOT EXISTS designation VARCHAR(100);
-ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name TEXT NOT NULL DEFAULT '';
-ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT NOT NULL DEFAULT '';
+-- Deployments whose admin table predates RBAC.
+ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS role VARCHAR(30) NOT NULL DEFAULT 'citizen';
+ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS department VARCHAR(100);
+ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS designation VARCHAR(100);
+ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS full_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS password_hash TEXT NOT NULL DEFAULT '';
 
 -- ---------------------------------------------------------------------------
 -- 2. Indexes — role/email lookups + the case-insensitive uniqueness the
 --    login lookup (LOWER(email) = LOWER($1)) and the seed upsert rely on
 -- ---------------------------------------------------------------------------
-CREATE INDEX IF NOT EXISTS idx_users_role_email ON users(email, role);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_unique ON users(LOWER(email));
+CREATE INDEX IF NOT EXISTS idx_admin_users_role_email ON admin_users(email, role);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_users_email_unique ON admin_users(LOWER(email));
 
 -- ---------------------------------------------------------------------------
 -- 3. Seed — provincial leadership master account.
@@ -47,7 +50,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_unique ON users(LOWER(email));
 --    sign-in). Upsert refreshes the roster metadata but NEVER the password
 --    hash, so re-running the seed cannot clobber a rotated credential.
 -- ---------------------------------------------------------------------------
-INSERT INTO users (full_name, email, password_hash, role, department, designation)
+INSERT INTO admin_users (full_name, email, password_hash, role, department, designation)
 VALUES (
   'Director General (DG) Local Govt',
   'dg.localgovt@punjab.gov.pk',

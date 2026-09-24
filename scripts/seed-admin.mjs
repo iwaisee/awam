@@ -51,7 +51,7 @@ try {
   }
   if (resetPassword) {
     await pool.query(
-      `UPDATE users SET password_hash = $1, updated_at = now()
+      `UPDATE admin_users SET password_hash = $1, updated_at = now()
        WHERE LOWER(email) = LOWER($2)`,
       [DEFAULT_PASSWORD_HASH, SEED_EMAIL],
     );
@@ -59,7 +59,7 @@ try {
   const { rows } = await pool.query(
     `SELECT full_name, email, role, department, designation,
             (password_hash <> '') AS has_password
-       FROM users WHERE LOWER(email) = LOWER($1)`,
+       FROM admin_users WHERE LOWER(email) = LOWER($1)`,
     [SEED_EMAIL],
   );
   if (rows.length === 0) {

@@ -29,7 +29,8 @@ declare global {
   var __sadaAdminBootstrap: Promise<void> | undefined;
 }
 
-function client(): ReturnType<typeof neon> {
+/** The console's Neon handle — one per process, reused across dev hot-reloads. */
+export function adminSql(): ReturnType<typeof neon> {
   if (!globalThis.__sadaAdminSql) {
     const url = process.env.DATABASE_URL;
     if (!url) {
@@ -42,9 +43,10 @@ function client(): ReturnType<typeof neon> {
   return globalThis.__sadaAdminSql;
 }
 
-function ensureAdminSchema(): Promise<void> {
+/** Idempotent DDL + seed, run once per process before any admin query. */
+export function ensureAdminSchema(): Promise<void> {
   globalThis.__sadaAdminBootstrap ??= (async () => {
-    const sql = client();
+    const sql = adminSql();
     await sql`
       CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
@@ -77,6 +79,14 @@ function ensureAdminSchema(): Promise<void> {
         designation = EXCLUDED.designation,
         updated_at = now()
     `;
+    await sql`
+      CREATE TABLE IF NOT EXISTS admin_sessions (
+        token_hash TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        expires_at TIMESTAMPTZ NOT NULL
+      )
+    `;
+    await sql`CREATE INDEX IF NOT EXISTS idx_admin_sessions_expiry ON admin_sessions(expires_at)`;
   })().catch((error: unknown) => {
     // Don't cache failures — a fixed DATABASE_URL must retry without a restart.
     globalThis.__sadaAdminBootstrap = undefined;
@@ -90,10 +100,25 @@ export async function getAdminUserByEmail(
   email: string,
 ): Promise<AdminUserRow | undefined> {
   await ensureAdminSchema();
-  const rows = (await client()`
+  const rows = (await adminSql()`
     SELECT id, full_name, email, password_hash, role, department
       FROM users
      WHERE LOWER(email) = LOWER(${email})
+     LIMIT 1
+  `) as AdminUserRow[];
+  return rows[0];
+}
+
+/** The officer record for a session's user id, or undefined once the account
+    is gone (the FK cascade deletes the session row with it). */
+export async function getAdminUserById(
+  id: string,
+): Promise<AdminUserRow | undefined> {
+  await ensureAdminSchema();
+  const rows = (await adminSql()`
+    SELECT id, full_name, email, password_hash, role, department
+      FROM users
+     WHERE id = ${id}
      LIMIT 1
   `) as AdminUserRow[];
   return rows[0];

@@ -5,8 +5,9 @@
 -- Standalone `users` table for the Admin Console. Deliberately separate from
 -- `citizen_users`: citizens sign in by mobile number into database-backed
 -- session rows; officers sign in by official government email + bcrypt
--- password into a signed JWT cookie scoped to /admin. The two identity
--- stores share nothing.
+-- password into their own session rows (2026-09-24-admin-sessions.sql), held
+-- as an httpOnly cookie scoped to /admin. The two identity stores share
+-- nothing.
 --
 -- Apply with:  npm run seed:admin
 -- ============================================================================

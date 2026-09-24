@@ -1,22 +1,16 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import {
-  ADMIN_COOKIE_NAME,
-  ADMIN_COOKIE_PATH,
-  verifyAdminToken,
-} from "@/lib/adminAuth";
+import { ADMIN_COOKIE_NAME } from "@/lib/adminCookie";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/cookie";
 import { signInHref, withQuery } from "@/lib/auth/returnPath";
 
-/* Two independent, decoupled gates in one proxy file.
+/* Two independent, decoupled gates in one proxy file, both presence-only.
 
-   ADMIN GATE (/admin/*): the sada_admin_token cookie carries a signed JWT, so
-   unlike the citizen gate the check here is cryptographic — signature, issuer
-   and expiry are verified via `jose` (edge-safe Web Crypto, no node:crypto).
-   Valid claims ride downstream as x-admin-* request headers for Server
-   Components; a present-but-invalid token is deleted so it cannot shadow a
-   future session. Login POSTs are Server Functions on the page route, so the
-   /admin matcher also covers them — the login page is the explicit exception.
+   ADMIN GATE (/admin/*): the sada_admin_session cookie is an opaque random
+   token whose SHA-256 lives in the `admin_sessions` table, so nothing here can
+   judge it — the proxy only routes. The database verdict is rendered once per
+   request in the console layout (src/app/(console)/layout.tsx), which is what
+   makes a logout, a demotion or a deleted account take effect immediately.
 
    CITIZEN GATE (/report, /settings): presence-only, as before — cookies can be
    forged, so those surfaces still re-verify against the database in
@@ -36,23 +30,21 @@ function isAdminPath(pathname: string): boolean {
   return pathname === "/admin" || pathname.startsWith("/admin/");
 }
 
-async function handleAdmin(
+function handleAdmin(
   request: NextRequest,
   pathname: string,
-): Promise<NextResponse> {
-  const token = request.cookies.get(ADMIN_COOKIE_NAME)?.value;
-
-  // The sign-in surface itself: an already-cleared officer never sees the
-  // form again; everyone else gets it.
+): NextResponse {
+  // The sign-in surface stays reachable while a cookie is present: this layer
+  // cannot tell a live session from a dead one, and bouncing on presence alone
+  // would loop an officer whose row has just expired. The login page checks the
+  // database and redirects a genuine session onward itself.
   if (pathname === ADMIN_LOGIN_PATH || pathname.startsWith(`${ADMIN_LOGIN_PATH}/`)) {
-    if (token && (await verifyAdminToken(token))) {
-      return NextResponse.redirect(new URL("/admin", request.url));
-    }
     return NextResponse.next();
   }
 
-  // No token at all → straight to sign-in, carrying the deep link.
-  if (!token) {
+  // No cookie at all → straight to sign-in, carrying the deep link. With one
+  // present the real gate is src/app/(console)/layout.tsx.
+  if (!request.cookies.get(ADMIN_COOKIE_NAME)?.value) {
     return NextResponse.redirect(
       new URL(
         `/admin/login?redirect=${encodeURIComponent(pathname)}`,
@@ -61,24 +53,7 @@ async function handleAdmin(
     );
   }
 
-  const claims = await verifyAdminToken(token);
-  if (!claims) {
-    // Expired or tampered: strip the cookie (its path scope must match) and
-    // land on a clean sign-in.
-    const response = NextResponse.redirect(
-      new URL(ADMIN_LOGIN_PATH, request.url),
-    );
-    response.cookies.delete({ name: ADMIN_COOKIE_NAME, path: ADMIN_COOKIE_PATH });
-    return response;
-  }
-
-  // Verified officer — hand the claims to downstream Server Components
-  // without ever exposing the token itself.
-  const requestHeaders = new Headers(request.headers);
-  requestHeaders.set("x-admin-id", claims.userId);
-  requestHeaders.set("x-admin-role", claims.role);
-  requestHeaders.set("x-admin-dept", claims.department);
-  return NextResponse.next({ request: { headers: requestHeaders } });
+  return NextResponse.next();
 }
 
 export async function proxy(request: NextRequest) {

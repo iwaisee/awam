@@ -1,23 +1,30 @@
-import { jwtVerify, SignJWT } from "jose";
+import { cache } from "react";
+import { cookies } from "next/headers";
+import { ADMIN_COOKIE_NAME, ADMIN_COOKIE_PATH } from "@/lib/adminCookie";
+import {
+  createAdminSession,
+  getAdminSessionUser,
+  revokeAdminSession,
+} from "@/lib/adminSessionsDb";
+import type { AdminUserRow } from "@/lib/adminUsersDb";
 
-/* Administrative credential engine — fully decoupled from the citizen auth
-   stack (src/lib/auth/*). Citizens hold database-backed opaque session tokens
-   in `sada_session`; officers hold a self-contained HS256 JWT in
-   `sada_admin_token`, scoped to the /admin cookie path so it never travels on
-   a citizen route.
+/* The officer session cookie — the seam every protected admin surface reads
+   through. Same design as the citizen flow (src/lib/auth/session.ts): an
+   opaque random token in the browser, its SHA-256 in `admin_sessions`, and the
+   database as the single source of truth. Nothing is signed, so there is no
+   signing key to provision, and deleting a row ends a session immediately.
 
-   Everything here runs through `jose` (Web Crypto) rather than node:crypto,
-   so the same module is safe in the edge proxy and in Node-runtime server
-   actions. */
+   Still fully decoupled from the citizen stack: different cookie, different
+   table, different Neon seam (src/lib/adminUsersDb.ts). */
 
-/** Cookie path — the token only rides on admin routes. */
-export const ADMIN_COOKIE_PATH = "/admin";
-
-export const ADMIN_COOKIE_NAME = "sada_admin_token";
+/** 12-hour duty shift. Mirrors SESSION_HOURS in src/lib/adminSessionsDb.ts —
+    keep the two in sync. */
+export const ADMIN_COOKIE_MAX_AGE = 43_200;
 
 /** RBAC clearance roster. Anything else — including 'citizen' — is refused at
-    the login gate and again inside verifyAdminToken, so a citizen-tier token
-    can never be minted or honoured. */
+    the login gate and again in verifyAdminSession, so a citizen-tier account
+    can never hold a console session, and a demotion takes effect on the next
+    request rather than at token expiry. */
 export const ADMIN_ROLES = [
   "superadmin",
   "admin",
@@ -27,94 +34,60 @@ export const ADMIN_ROLES = [
 
 export type AdminRole = (typeof ADMIN_ROLES)[number];
 
-/** Claims carried inside the signed token — verified requests re-surface
-    these as x-admin-* headers for downstream Server Components. */
-export interface AdminJWTPayload {
-  userId: string;
-  email: string;
-  name: string;
-  role: AdminRole;
-  department: string;
+/** Vercel serves the pilot over HTTPS, so the cookie is `Secure` there; local
+    dev runs on http://localhost, where that flag would drop every request. */
+const IS_SECURE_CONTEXT = process.env.NODE_ENV === "production";
+
+/** Mint the session row and hand the browser its token. */
+export async function startAdminSession(user: AdminUserRow): Promise<void> {
+  const session = await createAdminSession(user.id);
+  const cookieStore = await cookies();
+  cookieStore.set({
+    name: ADMIN_COOKIE_NAME,
+    value: session.token,
+    httpOnly: true,
+    secure: IS_SECURE_CONTEXT,
+    sameSite: "lax",
+    path: ADMIN_COOKIE_PATH,
+    maxAge: ADMIN_COOKIE_MAX_AGE,
+  });
 }
 
-/** Distinguishes tokens minted for this console from any other HS256 JWT on
-    the same secret. */
-const JWT_ISSUER = "sada-e-awam:admin-console";
-
-/** 12-hour duty shift, or the standard 4-hour window. Mirrors the cookie
-    maxAge in actions.ts — keep the two in sync. */
-export const ADMIN_SHIFT_MAX_AGE = { shift: 43_200, standard: 14_400 } as const;
-
-/** An ADMIN_JWT_SECRET shorter than this is brute-forceable; production
-    refuses to boot on one. Development falls back to a labelled default so
-    `next dev` works before the secret is provisioned. */
-const DEV_FALLBACK_SECRET =
-  "sada-e-awam/admin-console/dev-only-secret-do-not-ship-to-production";
-
-function getSecretKey(): Uint8Array {
-  const secret = process.env.ADMIN_JWT_SECRET;
-  if (process.env.NODE_ENV === "production") {
-    if (!secret || secret.length < 32) {
-      throw new Error(
-        "ADMIN_JWT_SECRET must be set to at least 32 characters in production.",
-      );
-    }
-  }
-  return new TextEncoder().encode(
-    secret && secret.length >= 32 ? secret : DEV_FALLBACK_SECRET,
-  );
+/** Delete the row, then the cookie. Revocation happens on the server, so a
+    stolen cookie stops working even if it survives in the browser. */
+export async function endAdminSession(): Promise<void> {
+  const cookieStore = await cookies();
+  const raw = cookieStore.get(ADMIN_COOKIE_NAME)?.value;
+  if (raw) await revokeAdminSession(raw);
+  // Overwrite with an immediate expiry on the same path — `delete(name)`
+  // targets path "/", which would leave this /admin-scoped cookie alive.
+  cookieStore.set({
+    name: ADMIN_COOKIE_NAME,
+    value: "",
+    httpOnly: true,
+    secure: IS_SECURE_CONTEXT,
+    sameSite: "lax",
+    path: ADMIN_COOKIE_PATH,
+    maxAge: 0,
+  });
 }
 
-/** Mint an officer's session token. `is12HourShift` is the "Maintain active
-    session for 12-hour duty shift" checkbox: checked → 12h, else 4h. */
-export async function signAdminToken(
-  payload: AdminJWTPayload,
-  is12HourShift: boolean,
-): Promise<string> {
-  return new SignJWT({
-    email: payload.email,
-    name: payload.name,
-    role: payload.role,
-    department: payload.department,
-  })
-    .setProtectedHeader({ alg: "HS256" })
-    .setSubject(payload.userId)
-    .setIssuer(JWT_ISSUER)
-    .setIssuedAt()
-    .setExpirationTime(is12HourShift ? "12h" : "4h")
-    .sign(getSecretKey());
-}
+/** The signed-in officer, or null. A tampered, expired, demoted, or
+    logged-out cookie all resolve to null — callers redirect, never 500.
 
-/** Validate signature, issuer, expiry — and the role roster. Returns the
-    verified claims, or null for anything tampered, expired, or carrying a
-    role that never held console clearance. */
-export async function verifyAdminToken(
-  token: string,
-): Promise<AdminJWTPayload | null> {
+    Memoised per request so the console layout and anything below it share one
+    database roundtrip. */
+export const verifyAdminSession = cache(async (): Promise<AdminUserRow | null> => {
+  const cookieStore = await cookies();
+  const raw = cookieStore.get(ADMIN_COOKIE_NAME)?.value;
+  if (!raw) return null;
   try {
-    const { payload } = await jwtVerify(token, getSecretKey(), {
-      issuer: JWT_ISSUER,
-    });
-    const role = payload.role;
-    if (
-      typeof payload.sub !== "string" ||
-      typeof payload.email !== "string" ||
-      typeof payload.name !== "string" ||
-      typeof role !== "string" ||
-      !ADMIN_ROLES.includes(role as AdminRole)
-    ) {
-      return null;
-    }
-    return {
-      userId: payload.sub,
-      email: payload.email,
-      name: payload.name,
-      role: role as AdminRole,
-      department:
-        typeof payload.department === "string" ? payload.department : "",
-    };
-  } catch {
-    // Expired, malformed, wrong signature/issuer — all resolve to "no session".
+    const user = await getAdminSessionUser(raw);
+    if (!user) return null;
+    const role = (user.role ?? "citizen").toLowerCase();
+    return ADMIN_ROLES.includes(role as AdminRole) ? user : null;
+  } catch (error) {
+    console.error("[admin-auth] session lookup failed", error);
     return null;
   }
-}
+});

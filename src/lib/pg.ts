@@ -304,6 +304,30 @@ CREATE INDEX IF NOT EXISTS idx_citizen_sessions_expiry ON citizen_sessions (expi
    admin surfaces, stays unattributed. */
 ALTER TABLE reports ADD COLUMN IF NOT EXISTS user_id TEXT;
 
+/* ------------------------------ Citizen votes ------------------------------
+   One confirmation per account per ticket — the ledger's anti-inflation rule.
+   The PRIMARY KEY is the constraint that makes a second vote impossible; the
+   FKs retire a ticket's votes with the ticket, and an account's votes with
+   the account. */
+CREATE TABLE IF NOT EXISTS report_votes (
+  report_id TEXT NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES citizen_users(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (report_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_report_votes_user ON report_votes (user_id);
+
+/* ------------------------- Resolution email alerts -------------------------
+   Per-account "email me when this ticket is resolved" switches. Separate from
+   votes: a citizen can watch a ticket they never confirmed. */
+CREATE TABLE IF NOT EXISTS report_alerts (
+  report_id TEXT NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES citizen_users(id) ON DELETE CASCADE,
+  email_on_resolve BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (report_id, user_id)
+);
+
 /* ---------------- Territories (normalized coverage document) ----------------
    The client still speaks the whole-document { cities, categories, provinces }
    contract (see territoriesDb.ts); these tables are its normalized store. */

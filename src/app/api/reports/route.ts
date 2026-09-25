@@ -17,6 +17,7 @@ import {
   listReports,
   patchReport,
   ticketTokenExists,
+  toggleReportVote,
 } from "@/lib/reportsDb";
 import { pickSquadForReport } from "@/lib/dispatchAssign";
 import { isCloudinaryConfigured, uploadImage } from "@/lib/cloudinary";
@@ -150,6 +151,40 @@ export async function PATCH(request: Request) {
       );
     }
 
+    /* Citizen voting is an attributed action: the PATCH only moves the counter
+       when a verified account is behind the session cookie, and the
+       report_votes key makes it one vote per account — a duplicate request is
+       an acknowledged no-op, never a second +1. */
+    if (body.upvote !== undefined) {
+      const user = await verifySession();
+      if (!user) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "Sign in to confirm a report.",
+            code: "AUTH_REQUIRED",
+          },
+          { status: 401 },
+        );
+      }
+      const result = await toggleReportVote(
+        existing.id,
+        user.id,
+        body.upvote === true,
+      );
+      if (!result) {
+        return NextResponse.json(
+          { success: false, error: `No report found for ${id}.` },
+          { status: 404 },
+        );
+      }
+      return NextResponse.json({
+        success: true,
+        voted: result.voted,
+        report: result.report,
+      });
+    }
+
     const assignedUnit =
       typeof body.assigned_unit === "string" && body.assigned_unit.trim()
         ? body.assigned_unit.trim().slice(0, 120)
@@ -167,7 +202,6 @@ export async function PATCH(request: Request) {
     if (assignedUnit) patch.assigned_unit = assignedUnit;
     if (assignedAgency) patch.assigned_agency = assignedAgency;
     if (urgency) patch.urgency = urgency;
-    if (body.upvote === true) patch.upvote = true;
 
     // Squad resolution proof — only meaningful on a resolved ticket. The
     // after-photo follows the shared evidence-photo policy (see above).

@@ -1,6 +1,6 @@
 "use client";
 
-import { X } from "lucide-react";
+
 import LiveReportCapture from "@/components/report/LiveReportCapture";
 import { SEVERITY_MAP } from "@/config/severity";
 import type { ReportFormData } from "@/types/report";
@@ -56,26 +56,15 @@ export default function StepEvidence({ formData, updateForm }: StepEvidenceProps
             <span className="text-xs font-bold text-ink">
               Tagged Issues:
             </span>
+            {/* Display-only: the detailed issue is chosen (and changeable) in
+                its own wizard step, so a stray removal cannot dead-end the
+                required-evidence gate here. */}
             {formData.selectedTags.map((tag) => (
               <span
                 key={tag}
                 className="flex items-center gap-1 rounded-full border border-primary/25 bg-white px-2.5 py-0.5 text-xs font-semibold text-ink"
               >
                 {tag}
-                <button
-                  type="button"
-                  aria-label={`Remove tag ${tag}`}
-                  onClick={() =>
-                    updateForm({
-                      selectedTags: formData.selectedTags.filter(
-                        (t) => t !== tag
-                      ),
-                    })
-                  }
-                  className="rounded-full p-0.5 text-ink-muted transition-colors hover:bg-danger-tint hover:text-danger"
-                >
-                  <X className="h-3 w-3" />
-                </button>
               </span>
             ))}
           </div>

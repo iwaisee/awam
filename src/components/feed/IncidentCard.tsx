@@ -102,6 +102,7 @@ const SQUAD_BY_CATEGORY: Record<string, string> = {
 export default function IncidentCard({
   report,
   voted,
+  voteDelta = 0,
   onToggleVote,
   onInspect,
   onToast,
@@ -110,6 +111,10 @@ export default function IncidentCard({
 }: {
   report: FeedReport;
   voted: boolean;
+  /** This session's unconfirmed-by-the-snapshot vote change (±1). A vote
+      restored from the ledger is already inside `report.upvotes`, so the
+      restored pressed state must not add to the count again. */
+  voteDelta?: number;
   onToggleVote: () => void;
   onInspect: () => void;
   onToast?: (message: string) => void;
@@ -129,7 +134,7 @@ export default function IncidentCard({
       ? `${report.hoursAgo}h ago`
       : `${Math.round(report.hoursAgo / 24)}d ago`;
 
-  const confirmCount = report.upvotes + (voted ? 1 : 0);
+  const confirmCount = Math.max(0, report.upvotes + voteDelta);
 
   // A deleted/broken evidence photo (e.g. a purged Cloudinary asset) must
   // never render as an empty tile — drop back to the category texture. The
@@ -299,7 +304,7 @@ export default function IncidentCard({
               className={`h-4 w-4 ${voted ? "fill-white text-white" : "text-slate-400"}`}
             />
             {voted
-              ? `${confirmCount} Confirmed (+15 pts awarded)`
+              ? `${confirmCount} Confirmed`
               : `${confirmCount} Affected`}
           </button>
         ) : (

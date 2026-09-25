@@ -2,9 +2,10 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { MapPin, Layers, Camera, ClipboardCheck, ChevronLeft, ChevronRight } from "lucide-react";
+import { MapPin, Layers, ListFilter, Camera, ClipboardCheck, ChevronLeft, ChevronRight } from "lucide-react";
 import StepLocation from "@/components/StepLocation";
 import StepCategory from "@/components/StepCategory";
+import StepIssueDetail from "@/components/StepIssueDetail";
 import StepEvidence from "@/components/StepEvidence";
 import StepReview from "@/components/StepReview";
 import StepConfirmation from "@/components/StepConfirmation";
@@ -30,6 +31,11 @@ const STEPS = [
     label: "Category",
     urdu: "قسم",
     icon: Layers,
+  },
+  {
+    label: "Issue Detail",
+    urdu: "تفصیلی قسم",
+    icon: ListFilter,
   },
   {
     label: "Evidence",
@@ -145,7 +151,11 @@ export default function WizardShell({
       if (!formData.category || !visible.some((c) => c.id === formData.category))
         return false;
     }
+    // Detailed issue (Suthra-style menu) is required once the category stands.
     if (completedStep >= 2) {
+      if (formData.selectedTags.length === 0) return false;
+    }
+    if (completedStep >= 3) {
       if (!formData.title.trim() || !formData.description.trim()) return false;
       // Proof-of-Presence gate: a verified live capture (GPS fix + stamped
       // photo) is mandatory evidence before review.
@@ -239,12 +249,15 @@ export default function WizardShell({
         ? formData.category !== null &&
           canProceedUpTo(1)
         : step === 2
-          ? formData.title.trim() !== "" &&
-            formData.description.trim() !== "" &&
-            // Verified live capture required (see canProceedUpTo).
-            formData.geo !== null &&
-            formData.files.length > 0
-          : true);
+          ? // A detailed issue must be chosen before evidence.
+            formData.selectedTags.length > 0
+          : step === 3
+            ? formData.title.trim() !== "" &&
+              formData.description.trim() !== "" &&
+              // Verified live capture required (see canProceedUpTo).
+              formData.geo !== null &&
+              formData.files.length > 0
+            : true);
 
   return (
     <div className="flex items-start justify-center bg-canvas px-4 py-10 sm:py-14">
@@ -336,8 +349,9 @@ export default function WizardShell({
           >
             {step === 0 && <StepLocation formData={formData} updateForm={updateForm} />}
             {step === 1 && <StepCategory formData={formData} updateForm={updateForm} />}
-            {step === 2 && <StepEvidence formData={formData} updateForm={updateForm} />}
-            {step === 3 && (
+            {step === 2 && <StepIssueDetail formData={formData} updateForm={updateForm} />}
+            {step === 3 && <StepEvidence formData={formData} updateForm={updateForm} />}
+            {step === 4 && (
               <StepReview
                 formData={formData}
                 updateForm={updateForm}

@@ -81,6 +81,11 @@ function FeedHub() {
     params.get("status") === "resolved" ? "resolved" : "affected",
   );
   const [votedIds, setVotedIds] = useState<Set<string>>(new Set());
+  /** Optimistic bridge between the ledger snapshot and this session's votes.
+      Kept separate from `votedIds` because a vote restored from the server is
+      already inside the snapshot's `upvotes` — counting those again would
+      double every prior confirmation after a reload. */
+  const [voteDeltas, setVoteDeltas] = useState<Record<string, number>>({});
   const [toast, setToast] = useState<string | null>(null);
   const [drawerToken, setDrawerToken] = useState<string | null>(null);
 
@@ -96,17 +101,116 @@ function FeedHub() {
     return () => window.clearTimeout(timer);
   }, [toast]);
 
+  /* Which tickets has this account already confirmed? Restores the pressed
+     state after a reload; a signed-out visitor gets an empty list. */
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/reports/votes", { cache: "no-store" })
+      .then((res) =>
+        res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`)),
+      )
+      .then((data: { votedTokens?: unknown }) => {
+        if (cancelled || !Array.isArray(data.votedTokens)) return;
+        setVotedIds(
+          new Set(
+            data.votedTokens.filter(
+              (token): token is string => typeof token === "string",
+            ),
+          ),
+        );
+      })
+      .catch(() => {
+        // Signed out or offline — the buttons simply start unpressed.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const toggleVote = (id: string) => {
+    const willVote = !votedIds.has(id);
+    // The snapshot the cards render from — the PATCH answer is reconciled
+    // against it, so the ledger's verdict (including a duplicate-vote no-op)
+    // always wins over the optimistic guess.
+    const snapshotUpvotes = liveReports.find((r) => r.id === id)?.upvotes;
+
     setVotedIds((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
+      if (willVote) {
         next.add(id);
-        setToast("✓ Your confirmation escalated this ticket's priority.");
+      } else {
+        next.delete(id);
       }
       return next;
     });
+    setVoteDeltas((prev) => ({
+      ...prev,
+      [id]: (prev[id] ?? 0) + (willVote ? 1 : -1),
+    }));
+    if (willVote) {
+      setToast("✓ Your confirmation escalated this ticket's priority.");
+    }
+
+    void fetch("/api/reports", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, upvote: willVote }),
+    })
+      .then(async (res) => {
+        const body = (await res.json().catch(() => null)) as {
+          success?: boolean;
+          voted?: boolean;
+          report?: { upvotes?: number };
+          error?: string;
+        } | null;
+        if (!res.ok || !body?.success) {
+          throw new Error(body?.error || `HTTP ${res.status}`);
+        }
+        return body;
+      })
+      .then((body) => {
+        if (
+          typeof snapshotUpvotes === "number" &&
+          typeof body.report?.upvotes === "number"
+        ) {
+          setVoteDeltas((prev) => ({
+            ...prev,
+            [id]: body.report!.upvotes! - snapshotUpvotes,
+          }));
+        }
+        if (typeof body.voted === "boolean") {
+          setVotedIds((prev) => {
+            const next = new Set(prev);
+            if (body.voted) {
+              next.add(id);
+            } else {
+              next.delete(id);
+            }
+            return next;
+          });
+        }
+      })
+      .catch((error: unknown) => {
+        setVotedIds((prev) => {
+          const next = new Set(prev);
+          if (willVote) {
+            next.delete(id);
+          } else {
+            next.add(id);
+          }
+          return next;
+        });
+        setVoteDeltas((prev) => ({
+          ...prev,
+          [id]: (prev[id] ?? 0) + (willVote ? -1 : 1),
+        }));
+        const reason = error instanceof Error ? error.message : "";
+        setToast(
+          reason && !/^(HTTP|Failed to fetch|Load failed)/.test(reason)
+            ? reason
+            : "Could not save your confirmation — please try again.",
+        );
+      });
   };
 
   const reports = useMemo(() => {
@@ -131,10 +235,10 @@ function FeedHub() {
     }
     return [...filtered].sort(
       (a, b) =>
-        b.upvotes + (votedIds.has(b.id) ? 1 : 0) -
-        (a.upvotes + (votedIds.has(a.id) ? 1 : 0)),
+        b.upvotes + (voteDeltas[b.id] ?? 0) -
+        (a.upvotes + (voteDeltas[a.id] ?? 0)),
     );
-  }, [liveReports, search, locality, agency, sort, votedIds]);
+  }, [liveReports, search, locality, agency, sort, voteDeltas]);
 
   const resetFilters = () => {
     setSearch("");
@@ -325,6 +429,7 @@ function FeedHub() {
                 key={report.id}
                 report={report}
                 voted={votedIds.has(report.id)}
+                voteDelta={voteDeltas[report.id] ?? 0}
                 onToggleVote={() => toggleVote(report.id)}
                 onInspect={() => setDrawerToken(report.id)}
                 onToast={setToast}

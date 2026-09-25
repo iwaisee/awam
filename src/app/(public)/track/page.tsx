@@ -22,6 +22,7 @@ import {
   Landmark,
   Link2,
   MapPin,
+  Mail,
   Maximize2,
   MessageCircle,
   Phone,
@@ -42,11 +43,13 @@ import {
   fmtClock,
   normalizePhone,
   normalizeToken,
+  resolveRegistryAssignment,
   slaProgressPct,
   slaRemainingLabel,
   type TrackDossier,
   type TrackPhoto,
 } from "@/lib/trackDossiers";
+import { useDepartmentRegistry } from "@/hooks/useDepartmentRegistry";
 import { agencyCode, reportTitle } from "@/lib/feedReports";
 import { useCitizenProfile } from "@/context/UserContext";
 import type { IncidentReport } from "@/types/civic";
@@ -132,7 +135,66 @@ function TrackPageInner() {
 
   const [mode, setMode] = useState<LookupMode>("ticket");
   const [query, setQuery] = useState(initialId ?? "");
-  const [dossier, setDossier] = useState<TrackDossier | null>(null);
+  // The dossier is derived from the ledger row plus the departments registry,
+  // so the assignment card carries the real desk — squad lead, division
+  // manager, agency HQ — and rebuilds whenever the registry syncs.
+  const [dossierSource, setDossierSource] = useState<IncidentReport | null>(
+    null,
+  );
+  const { sectors } = useDepartmentRegistry();
+  const dossier = useMemo(() => {
+    if (!dossierSource) return null;
+    return dossierFromReport(
+      dossierSource,
+      resolveRegistryAssignment(
+        sectors,
+        dossierSource.assigned_agency,
+        // In triage the crew attachment is only a reservation — show the
+        // agency's own desk, not the provisional crew's chain of command.
+        dossierSource.status === "triage" ? undefined : dossierSource.assigned_unit,
+        dossierSource.city_name,
+      ),
+    );
+  }, [dossierSource, sectors]);
+
+  /* Live dossier — while a ticket is open, its ledger row is re-polled so a
+     squad assignment or status change made in the admin console shows up here
+     without a reload. The state only moves when the row actually changed. */
+  const dossierToken = dossierSource?.tracking_token ?? null;
+  useEffect(() => {
+    if (!dossierToken) return;
+    let cancelled = false;
+    const poll = () => {
+      void (async () => {
+        try {
+          const response = await fetch("/api/reports", { cache: "no-store" });
+          const data: unknown = await response.json();
+          const fresh = Array.isArray(data)
+            ? (data as IncidentReport[]).find(
+                (r) =>
+                  normalizeToken(r.tracking_token) === dossierToken ||
+                  normalizeToken(r.id) === dossierToken,
+              )
+            : null;
+          if (!cancelled && fresh) {
+            setDossierSource((prev) =>
+              prev && JSON.stringify(prev) === JSON.stringify(fresh)
+                ? prev
+                : fresh,
+            );
+          }
+        } catch {
+          // Ledger unreachable — keep showing the last known state.
+        }
+      })();
+    };
+    const timer = window.setInterval(poll, 15_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [dossierToken]);
+
   const [miss, setMiss] = useState<string | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
   // Live citizen filings from the JSON ledger; null until the first fetch lands.
@@ -170,15 +232,16 @@ function TrackPageInner() {
     return out;
   }, [reports]);
 
-  const resolveToken = (token: string): TrackDossier | null => {
+  const resolveToken = (token: string): IncidentReport | null => {
     // The ledger is the single source of truth — a token that is not in the
     // backend does not resolve, no matter what a device cache once held.
-    const live = reports?.find(
-      (r) =>
-        normalizeToken(r.tracking_token) === token ||
-        normalizeToken(r.id) === token,
+    return (
+      reports?.find(
+        (r) =>
+          normalizeToken(r.tracking_token) === token ||
+          normalizeToken(r.id) === token,
+      ) ?? null
     );
-    return live ? dossierFromReport(live) : null;
   };
 
   const runSearch = (raw: string, searchMode: LookupMode) => {
@@ -192,7 +255,7 @@ function TrackPageInner() {
       return;
     }
     setSearchError(null);
-    let found: TrackDossier | null = null;
+    let found: IncidentReport | null = null;
     let missed = value;
     if (searchMode === "ticket") {
       const token = normalizeToken(value);
@@ -200,22 +263,21 @@ function TrackPageInner() {
       if (!found) missed = `#${token}`;
     } else {
       const needle = normalizePhone(value);
-      const live = reports?.find(
-        (r) => normalizePhone(r.citizen_phone) === needle,
-      );
-      found = live ? dossierFromReport(live) : null;
+      found =
+        reports?.find((r) => normalizePhone(r.citizen_phone) === needle) ??
+        null;
     }
     if (found) {
-      setDossier(found);
+      setDossierSource(found);
       setMiss(null);
       window.history.replaceState(
         null,
         "",
-        `/track?id=${encodeURIComponent(found.token)}`,
+        `/track?id=${encodeURIComponent(found.tracking_token)}`,
       );
       window.scrollTo({ top: 0, behavior: "smooth" });
     } else {
-      setDossier(null);
+      setDossierSource(null);
       setMiss(missed);
     }
   };
@@ -232,7 +294,7 @@ function TrackPageInner() {
   }, [pendingId, reports]);
 
   const clearSearch = () => {
-    setDossier(null);
+    setDossierSource(null);
     setMiss(null);
     setSearchError(null);
     setQuery("");
@@ -655,10 +717,11 @@ function DossierView({ dossier }: { dossier: TrackDossier }) {
   const resolved =
     Boolean(dossier.sla?.resolvedMs) || dossier.statusTone === "emerald";
   const [now, setNow] = useState(() => Date.now());
-  const [whatsappPing, setWhatsappPing] = useState(false);
+  const [emailAlert, setEmailAlert] = useState(false);
   const [upvoted, setUpvoted] = useState(false);
   // Optimistic count; synced to the ledger's value once the PATCH returns.
   const [upvoteTotal, setUpvoteTotal] = useState(dossier.upvotes);
+  const [voteNotice, setVoteNotice] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [expanded, setExpanded] = useState<TrackPhoto | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
@@ -711,26 +774,113 @@ function DossierView({ dossier }: { dossier: TrackDossier }) {
   };
 
   /** "Confirm Issue Still Present" — persisted to the ledger so the
-      endorsement count is real municipal data, not per-session state. */
-  const confirmIssue = async () => {
-    if (upvoted) return;
-    setUpvoted(true);
-    setUpvoteTotal((n) => n + 1);
+      endorsement count is real municipal data, not per-session state. One
+      confirmation per account: clicking a confirmed ticket retracts it. */
+  const revertVote = (willConfirm: boolean, notice: string) => {
+    setUpvoted(!willConfirm);
+    setUpvoteTotal((n) => Math.max(0, n + (willConfirm ? -1 : 1)));
+    setVoteNotice(notice);
+    window.setTimeout(() => setVoteNotice(null), 4000);
+  };
+
+  const toggleConfirm = async () => {
+    const willConfirm = !upvoted;
+    setUpvoted(willConfirm);
+    setUpvoteTotal((n) => n + (willConfirm ? 1 : -1));
     try {
       const response = await fetch("/api/reports", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: dossier.token, upvote: true }),
+        body: JSON.stringify({ id: dossier.token, upvote: willConfirm }),
       });
-      const data = (await response.json()) as {
+      const data = (await response.json().catch(() => null)) as {
         success?: boolean;
         report?: IncidentReport;
-      };
-      if (data.success && data.report) {
+        error?: string;
+      } | null;
+      if (data?.success && data.report) {
         setUpvoteTotal(data.report.upvotes);
+        return;
+      }
+      // Rejected by the ledger (signed out, etc.) — the button must not claim
+      // a confirmation the account does not hold.
+      revertVote(willConfirm, data?.error || "Could not save your confirmation — please try again.");
+    } catch {
+      revertVote(willConfirm, "Could not save your confirmation — please try again.");
+    }
+  };
+
+  /** Which tickets has this account already confirmed? Restores the
+      confirmed state after a reload, so the button reflects the ledger. */
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/reports/votes", { cache: "no-store" })
+      .then((res) =>
+        res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`)),
+      )
+      .then((data: { votedTokens?: unknown }) => {
+        if (
+          cancelled ||
+          !Array.isArray(data.votedTokens) ||
+          !data.votedTokens.includes(dossier.token)
+        )
+          return;
+        setUpvoted(true);
+      })
+      .catch(() => {
+        // Signed out or offline — the button starts in its invite state.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [dossier.token]);
+
+  /** The account's per-ticket "email me on resolution" switch, restored from
+      the ledger so the toggle reflects stored reality, not this browser. */
+  useEffect(() => {
+    let cancelled = false;
+    fetch(
+      `/api/reports/alerts?id=${encodeURIComponent(dossier.token)}`,
+      { cache: "no-store" },
+    )
+      .then((res) =>
+        res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`)),
+      )
+      .then((data: { enabled?: boolean }) => {
+        if (!cancelled && data?.enabled === true) setEmailAlert(true);
+      })
+      .catch(() => {
+        // Signed out or offline — the switch starts off.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [dossier.token]);
+
+  const toggleEmailAlert = async () => {
+    const next = !emailAlert;
+    setEmailAlert(next);
+    try {
+      const response = await fetch("/api/reports/alerts", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: dossier.token, enabled: next }),
+      });
+      const data = (await response.json().catch(() => null)) as {
+        success?: boolean;
+        error?: string;
+      } | null;
+      if (!response.ok || !data?.success) {
+        setEmailAlert(!next);
+        setVoteNotice(
+          data?.error || "Could not save your alert preference — please try again.",
+        );
+        window.setTimeout(() => setVoteNotice(null), 4000);
       }
     } catch {
-      // Ledger unreachable — the optimistic count stands for this session.
+      setEmailAlert(!next);
+      setVoteNotice("Could not save your alert preference — please try again.");
+      window.setTimeout(() => setVoteNotice(null), 4000);
     }
   };
 
@@ -830,49 +980,30 @@ function DossierView({ dossier }: { dossier: TrackDossier }) {
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-12">
         {/* ============================ LEFT COLUMN ============================ */}
         <article className="animate-dossier-in rounded-3xl border border-slate-200/80 bg-white p-6 shadow-xs sm:p-8 lg:col-span-7">
-          {/* Ticket header row: token, status, urgency, social share */}
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-mono text-lg font-bold tracking-wide text-slate-900">
+          {/* Dossier header — identity row above, status pills below */}
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+            <span className="inline-flex items-center rounded-xl border border-slate-200/80 bg-slate-50 py-1 pl-3 pr-1.5 font-mono text-sm font-bold tracking-wide text-slate-900">
               #{dossier.token}
-            </span>
-            <button
-              type="button"
-              onClick={copyToken}
-              aria-label="Copy ticket reference"
-              className="rounded-lg p-1.5 text-slate-400 transition-colors duration-150 hover:bg-slate-100 hover:text-slate-600"
-            >
-              {copied ? (
-                <Check className="h-3.5 w-3.5 text-emerald-600" />
-              ) : (
-                <Copy className="h-3.5 w-3.5" />
-              )}
-            </button>
-            <span
-              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-bold ${pill.pill}`}
-            >
-              {dossier.pulse ? (
-                <span className="relative flex h-2 w-2">
-                  <span
-                    aria-hidden
-                    className={`absolute inline-flex h-full w-full animate-ping rounded-full opacity-75 ${pill.dot}`}
-                  />
-                  <span
-                    aria-hidden
-                    className={`relative inline-flex h-2 w-2 rounded-full ${pill.dot}`}
-                  />
-                </span>
-              ) : (
-                <CheckCircle2 className="h-3.5 w-3.5" />
-              )}
-              {dossier.statusLabel}
-            </span>
-            <span
-              className={`rounded-md px-2.5 py-1 text-[11px] font-bold ${URGENCY_TAG[dossier.urgencyTone]}`}
-            >
-              {dossier.urgencyLabel}
+              <button
+                type="button"
+                onClick={copyToken}
+                aria-label="Copy ticket reference"
+                className="ml-1.5 inline-flex items-center gap-1 rounded-lg p-1.5 text-slate-400 transition-colors duration-150 hover:bg-white hover:text-slate-600"
+              >
+                {copied ? (
+                  <>
+                    <Check className="h-3.5 w-3.5 text-emerald-600" />
+                    <span className="text-[10px] font-bold uppercase tracking-wide text-emerald-600">
+                      Copied
+                    </span>
+                  </>
+                ) : (
+                  <Copy className="h-3.5 w-3.5" />
+                )}
+              </button>
             </span>
 
-            <div className="relative ms-auto" ref={shareRef}>
+            <div className="relative shrink-0" ref={shareRef}>
               <button
                 type="button"
                 onClick={shareReport}
@@ -910,27 +1041,63 @@ function DossierView({ dossier }: { dossier: TrackDossier }) {
             </div>
           </div>
 
-          {/* Incident site banner */}
-          <div className="mt-4 flex items-center gap-2 rounded-2xl border border-slate-200/80 bg-slate-50 p-3 text-xs font-bold text-slate-900">
-            <MapPin className="h-4 w-4 shrink-0 text-emerald-700" />
-            <span className="shrink-0 font-semibold text-slate-500">
-              Incident Site:
+          {/* Lifecycle + severity — one pill row, shared shape */}
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span
+              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-bold ${pill.pill}`}
+            >
+              {dossier.pulse ? (
+                <span className="relative flex h-2 w-2">
+                  <span
+                    aria-hidden
+                    className={`absolute inline-flex h-full w-full animate-ping rounded-full opacity-75 ${pill.dot}`}
+                  />
+                  <span
+                    aria-hidden
+                    className={`relative inline-flex h-2 w-2 rounded-full ${pill.dot}`}
+                  />
+                </span>
+              ) : (
+                <CheckCircle2 className="h-3.5 w-3.5" />
+              )}
+              {dossier.statusLabel}
             </span>
-            <span className="min-w-0 flex-1 leading-snug">
-              {dossier.location}
+            <span
+              className={`inline-flex items-center rounded-full px-3 py-1.5 text-[11px] font-bold ${URGENCY_TAG[dossier.urgencyTone]}`}
+            >
+              {dossier.urgencyLabel}
             </span>
           </div>
 
-          <h2 className="font-heading my-2 text-xl font-black tracking-tight leading-snug text-slate-900 sm:text-2xl">
-            {dossier.title}
-          </h2>
-          {dossier.titleUr && (
-            <p className="urdu mt-1 text-sm font-medium text-slate-500">
-              {dossier.titleUr}
-            </p>
-          )}
+          {/* Report content card — title, narrative, and site in one container */}
+          <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200/70 bg-slate-50/70">
+            <div className="p-4">
+              <h2 className="font-heading text-xl font-black tracking-tight leading-snug text-slate-900 sm:text-2xl">
+                {dossier.title}
+              </h2>
+              {dossier.titleUr && (
+                <p className="urdu mt-1 text-sm font-medium text-slate-500">
+                  {dossier.titleUr}
+                </p>
+              )}
+              {dossier.description && (
+                <p className="mt-2 text-xs font-normal leading-relaxed text-slate-700 sm:text-sm">
+                  {dossier.description}
+                </p>
+              )}
+            </div>
+            <div className="flex items-center gap-2 border-t border-slate-200/70 bg-white/60 px-4 py-3 text-xs font-bold text-slate-900">
+              <MapPin className="h-4 w-4 shrink-0 text-emerald-700" />
+              <span className="shrink-0 font-semibold text-slate-500">
+                Incident Site:
+              </span>
+              <span className="min-w-0 flex-1 leading-snug">
+                {dossier.location}
+              </span>
+            </div>
+          </div>
 
-          <div className="mt-2 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-slate-500">
+          <div className="mt-3 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-slate-500">
             <span>
               Category:{" "}
               <span className="font-semibold text-slate-700">
@@ -952,18 +1119,6 @@ function DossierView({ dossier }: { dossier: TrackDossier }) {
               </span>
             </span>
           </div>
-
-          {/* Citizen report narrative */}
-          {dossier.description && (
-            <div className="my-3 rounded-2xl border border-slate-200/70 bg-slate-50/70 p-4">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                Citizen Report Narrative
-              </p>
-              <p className="mt-1.5 text-xs font-normal leading-relaxed text-slate-700 sm:text-sm">
-                {dossier.description}
-              </p>
-            </div>
-          )}
 
           {/* Live SLA countdown meter */}
           {dossier.sla && <SlaMeter dossier={dossier} now={now} />}
@@ -1048,29 +1203,29 @@ function DossierView({ dossier }: { dossier: TrackDossier }) {
           <div className="-mx-6 -mb-6 mt-6 space-y-3 border-t border-slate-100 bg-slate-50/60 p-6 sm:-mx-8 sm:-mb-8 sm:p-8">
             <div className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200/80 bg-white p-4">
               <span className="flex min-w-0 items-center gap-2.5 text-sm font-semibold text-slate-700">
-                <MessageCircle
+                <Mail
                   className={`h-4.5 w-4.5 shrink-0 ${
-                    whatsappPing ? "text-emerald-700" : "text-slate-400"
+                    emailAlert ? "text-emerald-700" : "text-slate-400"
                   }`}
                 />
                 <span className="min-w-0">
-                  Receive automated WhatsApp update on status change
+                  Email me when this issue is resolved
                 </span>
               </span>
               <button
                 type="button"
                 role="switch"
-                aria-checked={whatsappPing}
-                aria-label="WhatsApp status alerts"
-                onClick={() => setWhatsappPing(!whatsappPing)}
+                aria-checked={emailAlert}
+                aria-label="Email me on resolution"
+                onClick={() => void toggleEmailAlert()}
                 className={`relative h-6 w-11 shrink-0 rounded-full transition-colors duration-150 ${
-                  whatsappPing ? "bg-emerald-600" : "bg-slate-300"
+                  emailAlert ? "bg-emerald-600" : "bg-slate-300"
                 }`}
               >
                 <span
                   aria-hidden
                   className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all duration-150 ${
-                    whatsappPing ? "left-[1.375rem]" : "left-0.5"
+                    emailAlert ? "left-[1.375rem]" : "left-0.5"
                   }`}
                 />
               </button>
@@ -1092,22 +1247,32 @@ function DossierView({ dossier }: { dossier: TrackDossier }) {
 
             <button
               type="button"
-              onClick={() => void confirmIssue()}
-              disabled={upvoted}
-              className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold transition-all duration-150 ${
+              onClick={() => void toggleConfirm()}
+              aria-pressed={upvoted}
+              title={
+                upvoted ? "Click to retract your confirmation" : undefined
+              }
+              className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold transition-all duration-150 active:scale-[0.99] ${
                 upvoted
-                  ? "border border-emerald-600 bg-emerald-50 text-emerald-800"
-                  : "border border-slate-200 bg-white text-slate-700 hover:border-emerald-400 hover:text-emerald-800 active:scale-[0.99]"
+                  ? "border border-[#0F5132] bg-[#0F5132] text-white shadow-xs hover:brightness-110"
+                  : "border border-slate-200 bg-white text-slate-700 hover:border-emerald-400 hover:text-emerald-800"
               }`}
             >
               <ThumbsUp className="h-4 w-4" />
-              {upvoted
-                ? "Confirmed — thank you for vetting this issue"
-                : "Confirm Issue Still Present"}
-              <span className="font-mono text-xs font-bold text-emerald-700">
-                (+1 Upvote • {upvoteTotal} total)
+              {upvoted ? "You Already Confirmed This Issue" : "Confirm Issue Still Present"}
+              <span
+                className={`font-mono text-xs font-bold ${
+                  upvoted ? "text-white/80" : "text-emerald-700"
+                }`}
+              >
+                ({upvoted ? upvoteTotal : `+1 Upvote • ${upvoteTotal}`} total)
               </span>
             </button>
+            {voteNotice && (
+              <p role="status" className="text-center text-xs font-semibold text-rose-600">
+                {voteNotice}
+              </p>
+            )}
           </div>
         </article>
 
@@ -1145,7 +1310,11 @@ function DossierView({ dossier }: { dossier: TrackDossier }) {
                       resolved ? "bg-emerald-600" : "bg-amber-500"
                     }`}
                   >
-                    {resolved ? "Resolved & Verified" : "Assigned"}
+                    {resolved
+                      ? "Resolved & Verified"
+                      : dossier.squad
+                        ? "Assigned"
+                        : "Awaiting Dispatch"}
                   </span>
                 </div>
               </div>
@@ -1189,20 +1358,22 @@ function DossierView({ dossier }: { dossier: TrackDossier }) {
                   {dossier.office}
                 </p>
               </div>
-              {dossier.squad && (
-                <>
-                  <div className="border-t border-dashed border-slate-300/80" />
-                  <div>
-                    <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                      <Truck className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-                      Assigned Field Squad
-                    </p>
-                    <p className="mt-0.5 pl-5 text-xs font-bold leading-snug text-slate-900">
-                      {dossier.squad}
-                    </p>
-                  </div>
-                </>
-              )}
+              <div className="border-t border-dashed border-slate-300/80" />
+              <div>
+                <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                  <Truck className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                  Assigned Field Squad
+                </p>
+                {dossier.squad ? (
+                  <p className="mt-0.5 pl-5 text-xs font-bold leading-snug text-slate-900">
+                    {dossier.squad}
+                  </p>
+                ) : (
+                  <p className="mt-0.5 pl-5 text-xs font-medium leading-snug text-slate-400">
+                    Will be assigned at dispatch
+                  </p>
+                )}
+              </div>
             </div>
 
             <a
@@ -1210,7 +1381,7 @@ function DossierView({ dossier }: { dossier: TrackDossier }) {
               className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-xs font-bold text-slate-900 shadow-2xs transition-all hover:bg-slate-50"
             >
               <PhoneCall className="h-3.5 w-3.5 shrink-0 text-emerald-700" />
-              Call SDO Desk: {dossier.deskPhone} ({dossier.deskHours})
+              Call Desk: {dossier.deskPhone} ({dossier.deskHours})
             </a>
           </section>
 

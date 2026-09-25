@@ -5,6 +5,9 @@ import {
   AlertTriangle,
   Building2,
   CheckCircle2,
+  ChevronDown,
+  Globe,
+  ListFilter,
   Pencil,
   Plus,
   Save,
@@ -14,6 +17,7 @@ import {
 } from "lucide-react";
 import { useCoverage } from "@/context/CoverageContext";
 import { CATEGORY_ICON_KEYS, categoryIcon } from "@/lib/categoryIcons";
+import { SUB_ISSUES } from "@/data/subIssues";
 import {
   AGENCY_OPTIONS,
   AGENCY_MANDATE,
@@ -30,7 +34,8 @@ interface CatFormState {
   nameEn: string;
   nameUr: string;
   description: string;
-  tagsInput: string;
+  /** Detailed issue menu rows — composed into the category's tags array. */
+  subIssues: { en: string; ur: string }[];
   icon: string;
   agency: AgencyName;
   urgency: UrgencyLevel;
@@ -42,11 +47,39 @@ interface CatFormState {
   active: boolean;
 }
 
+/* The menu's stored form is one string per issue with the Urdu copy in a
+   trailing parenthetical — "Heaps of Garbage (کچرے کے ڈھیر)" — the same
+   convention the reference taxonomy renders. The editor splits rows into
+   separate English/Urdu inputs and recomposes on save. */
+function splitIssue(raw: string): { en: string; ur: string } {
+  const match = raw.trim().match(/^(.*?)\s*\(([^()]*)\)$/);
+  if (match && match[1].trim()) return { en: match[1].trim(), ur: match[2].trim() };
+  return { en: raw.trim(), ur: "" };
+}
+
+function composeIssue(issue: { en: string; ur: string }): string {
+  const en = issue.en.trim();
+  const ur = issue.ur.trim();
+  return en && ur ? `${en} (${ur})` : en;
+}
+
+/** Tiny section rule for the editor modal — label + hairline. */
+function SectionLabel({ children }: { children: string }) {
+  return (
+    <div className="flex items-center gap-3">
+      <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-800">
+        {children}
+      </p>
+      <span aria-hidden className="h-px flex-1 bg-slate-100" />
+    </div>
+  );
+}
+
 const EMPTY_FORM: CatFormState = {
   nameEn: "",
   nameUr: "",
   description: "",
-  tagsInput: "",
+  subIssues: [],
   icon: "AlertOctagon",
   agency: "MCS",
   urgency: "routine",
@@ -62,6 +95,11 @@ const URGENCY_PILLS: Record<UrgencyLevel, string> = {
   emergency: "bg-rose-100 text-rose-700",
   urgent: "bg-amber-100 text-amber-800",
   routine: "bg-slate-100 text-slate-600",
+};
+const URGENCY_TEXT: Record<UrgencyLevel, string> = {
+  emergency: "text-rose-700",
+  urgent: "text-amber-700",
+  routine: "text-emerald-700",
 };
 
 const JURISDICTION_CHECKS: { value: JurisdictionType; label: string }[] = [
@@ -92,6 +130,12 @@ export default function CategoriesView() {
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState<CatFormState>(EMPTY_FORM);
   const [editingId, setEditingId] = useState<string | null>(null);
+  // The menu list is collapsible — long menus open collapsed so the modal
+  // stays scannable; short or empty menus open ready to edit.
+  const [menuOpen, setMenuOpen] = useState(false);
+  // Two-step delete inside the editor — the warning banner replaces the
+  // footer hint, so the destructive action can never fire accidentally.
+  const [confirmDeleteInModal, setConfirmDeleteInModal] = useState(false);
   const [formError, setFormError] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -117,6 +161,8 @@ export default function CategoriesView() {
     setForm({ ...EMPTY_FORM });
     setEditingId(null);
     setFormError("");
+    setMenuOpen(true);
+    setConfirmDeleteInModal(false);
     setModalOpen(true);
   };
 
@@ -125,7 +171,7 @@ export default function CategoriesView() {
       nameEn: cat.name_en,
       nameUr: cat.name_ur === "—" ? "" : cat.name_ur,
       description: cat.description,
-      tagsInput: cat.tags.join(", "),
+      subIssues: cat.tags.map(splitIssue),
       icon: cat.icon_name,
       agency: cat.default_agency,
       urgency: cat.urgency,
@@ -140,6 +186,8 @@ export default function CategoriesView() {
     });
     setEditingId(cat.id);
     setFormError("");
+    setMenuOpen(cat.tags.length <= 6);
+    setConfirmDeleteInModal(false);
     setModalOpen(true);
   };
 
@@ -161,6 +209,31 @@ export default function CategoriesView() {
     }));
   };
 
+  /* Detailed-issue menu rows */
+  const [newIssue, setNewIssue] = useState({ en: "", ur: "" });
+
+  const setIssueRow = (index: number, patch: { en?: string; ur?: string }) => {
+    setForm((f) => ({
+      ...f,
+      subIssues: f.subIssues.map((row, i) =>
+        i === index ? { ...row, ...patch } : row
+      ),
+    }));
+  };
+
+  const removeIssueRow = (index: number) => {
+    setForm((f) => ({
+      ...f,
+      subIssues: f.subIssues.filter((_, i) => i !== index),
+    }));
+  };
+
+  const addIssueRow = () => {
+    if (!newIssue.en.trim() && !newIssue.ur.trim()) return;
+    setForm((f) => ({ ...f, subIssues: [...f.subIssues, { ...newIssue }] }));
+    setNewIssue({ en: "", ur: "" });
+  };
+
   const save = () => {
     const name = form.nameEn.trim();
     if (!name) {
@@ -179,11 +252,11 @@ export default function CategoriesView() {
       name_en: name,
       name_ur: form.nameUr.trim() || "—",
       description: form.description.trim(),
-      tags: form.tagsInput
-        .split(",")
+      tags: form.subIssues
+        .map(composeIssue)
         .map((tag) => tag.trim())
         .filter(Boolean)
-        .slice(0, 6),
+        .slice(0, 30),
       icon_name: form.icon,
       default_agency: form.agency,
       sla_hours: Math.max(1, Math.round(form.slaHours) || 1),
@@ -202,6 +275,17 @@ export default function CategoriesView() {
       setToast(`Category “${name}” created`);
     }
     setModalOpen(false);
+  };
+
+  /** The editor's delete path — same persistence as the card list's
+      two-step confirm, surfaced where the officer is already working. */
+  const deleteFromModal = () => {
+    if (!editingId) return;
+    const name = form.nameEn.trim() || "this category";
+    removeCategory(editingId);
+    setConfirmDeleteInModal(false);
+    setModalOpen(false);
+    setToast(`Category “${name}” deleted`);
   };
 
   const scopeSummary = (cat: CategoryRule) => {
@@ -227,6 +311,9 @@ export default function CategoriesView() {
       </div>
     );
   }
+
+  /** Live preview icon for the editor's header band. */
+  const HeaderIcon = categoryIcon(form.icon);
 
   return (
     <div className="space-y-6">
@@ -260,84 +347,70 @@ export default function CategoriesView() {
           return (
             <article
               key={cat.id}
-              className={`rounded-2xl border p-5 shadow-xs transition-colors duration-150 ${
+              className={`relative overflow-hidden rounded-2xl border p-5 transition-all duration-200 hover:shadow-md ${
                 cat.status === "active"
-                  ? "border-slate-200/80 bg-white"
+                  ? "border-slate-200/80 bg-white hover:border-emerald-200"
                   : "border-slate-200/60 bg-slate-100/60"
               }`}
             >
               <div className="flex items-start gap-3.5">
                 <span
-                  className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${
+                  className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ring-1 ${
                     cat.status === "active"
-                      ? "bg-emerald-50 text-emerald-700"
-                      : "bg-slate-200/70 text-slate-400"
+                      ? "bg-emerald-50 text-emerald-700 ring-emerald-100"
+                      : "bg-slate-200/70 text-slate-400 ring-slate-200"
                   }`}
                 >
                   <Icon className="h-5 w-5" />
                 </span>
                 <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex items-center gap-2">
                     <h3
-                      className={`font-heading truncate text-sm font-bold ${
+                      className={`font-heading truncate text-base font-bold ${
                         cat.status === "active" ? "text-slate-900" : "text-slate-400"
                       }`}
                     >
                       {cat.name_en}
                     </h3>
-                    <span className="urdu text-xs text-emerald-700">
+                    <span className="urdu shrink-0 text-sm text-emerald-700">
                       {cat.name_ur}
-                    </span>
-                    <span
-                      className={`ml-auto whitespace-nowrap rounded-full px-2.5 py-0.5 text-[10px] font-bold ${
-                        cat.status === "active"
-                          ? "bg-emerald-100 text-emerald-700"
-                          : "bg-slate-200 text-slate-500"
-                      }`}
-                    >
-                      {cat.status === "active"
-                        ? "Active — in citizen forms"
-                        : "Hidden from citizens"}
                     </span>
                   </div>
                   <p
-                    className={`mt-1 line-clamp-1 text-xs ${
+                    className={`mt-0.5 line-clamp-1 text-xs ${
                       cat.status === "active" ? "text-slate-500" : "text-slate-400"
                     }`}
                   >
                     {cat.description}
                   </p>
-                  <div className="mt-2.5 flex flex-wrap items-center gap-2 text-[11px]">
-                    <span className="rounded-full bg-slate-100 px-2.5 py-0.5 font-semibold text-slate-600">
-                      {cat.default_agency}
-                    </span>
-                    <span className="rounded-full bg-slate-100 px-2.5 py-0.5 font-semibold text-slate-600">
-                      SLA:{" "}
-                      <span className="font-mono font-bold">{cat.sla_hours}h</span>
-                    </span>
+                  {/* Live status — dot + plain words instead of a pill */}
+                  <div className="mt-1.5 flex items-center gap-1.5 text-[11px] font-semibold">
                     <span
-                      className={`whitespace-nowrap rounded-full px-2.5 py-0.5 font-bold capitalize ${URGENCY_PILLS[cat.urgency]}`}
-                    >
-                      {cat.urgency === "emergency" ? "🚨 Emergency" : cat.urgency}
-                    </span>
+                      aria-hidden
+                      className={`h-1.5 w-1.5 rounded-full ${
+                        cat.status === "active" ? "bg-emerald-500" : "bg-slate-300"
+                      }`}
+                    />
                     <span
-                      className="hidden max-w-[220px] truncate whitespace-nowrap rounded-full bg-emerald-50 px-2 py-0.5 font-medium text-emerald-700 ring-1 ring-emerald-100 sm:inline-block"
-                      title={`${cityPart} • ${jurPart}`}
+                      className={
+                        cat.status === "active" ? "text-emerald-700" : "text-slate-400"
+                      }
                     >
-                      {cityPart} • {jurPart}
+                      {cat.status === "active"
+                        ? "Live in citizen forms"
+                        : "Hidden from citizens"}
                     </span>
                   </div>
                 </div>
-              </div>
 
-              <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-3.5">
+                {/* Visibility toggle — header corner */}
                 <button
                   type="button"
                   role="switch"
                   aria-checked={cat.status === "active"}
                   aria-label={`Toggle ${cat.name_en}`}
                   onClick={() => toggleCategoryStatus(cat.id)}
-                  className={`relative h-6 w-11 shrink-0 rounded-full transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-emerald-700/30 ${
+                  className={`relative ml-2 h-6 w-11 shrink-0 rounded-full transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-emerald-700/30 ${
                     cat.status === "active" ? "bg-emerald-600" : "bg-slate-300"
                   }`}
                 >
@@ -347,7 +420,52 @@ export default function CategoriesView() {
                     }`}
                   />
                 </button>
-                <div className="flex items-center gap-1.5">
+              </div>
+
+              {/* Routing stats — labeled cells replace the chip row */}
+              <div className="mt-4 grid grid-cols-3 gap-2">
+                <div className="min-w-0 rounded-xl border border-slate-200/80 bg-slate-50/70 px-3 py-2">
+                  <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                    Routed to
+                  </p>
+                  <p className="truncate text-xs font-bold text-slate-900">
+                    {cat.default_agency}
+                  </p>
+                </div>
+                <div className="min-w-0 rounded-xl border border-slate-200/80 bg-slate-50/70 px-3 py-2">
+                  <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                    Resolution
+                  </p>
+                  <p className="truncate text-xs font-bold text-slate-900">
+                    <span className="font-mono">{cat.sla_hours}h</span> SLA
+                  </p>
+                </div>
+                <div className="min-w-0 rounded-xl border border-slate-200/80 bg-slate-50/70 px-3 py-2">
+                  <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                    Priority
+                  </p>
+                  <p
+                    className={`truncate text-xs font-bold capitalize ${URGENCY_TEXT[cat.urgency]}`}
+                  >
+                    {cat.urgency}
+                  </p>
+                </div>
+              </div>
+
+              {/* Coverage */}
+              <div className="mt-2.5 flex items-center gap-1.5 text-[11px] text-slate-500">
+                <Globe className="h-3 w-3 shrink-0 text-slate-400" />
+                <span className="truncate" title={`${cityPart} • ${jurPart}`}>
+                  {cityPart} • {jurPart}
+                </span>
+              </div>
+
+              <div className="mt-3.5 flex items-center justify-between border-t border-slate-100 pt-3">
+                <span className="min-w-0 truncate text-[11px] font-medium text-slate-400">
+                  {cat.tags.length} detailed issue{cat.tags.length === 1 ? "" : "s"} in
+                  the wizard menu
+                </span>
+                <div className="flex shrink-0 items-center gap-1.5">
                   <button
                     type="button"
                     onClick={() => openEdit(cat)}
@@ -355,7 +473,7 @@ export default function CategoriesView() {
                     className="flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition-colors duration-150 hover:border-emerald-300 hover:text-emerald-700"
                   >
                     <Pencil className="h-3.5 w-3.5" />
-                    Edit Category
+                    Edit
                   </button>
                   {confirmDelete === cat.id ? (
                     <span className="flex items-center gap-1.5">
@@ -412,23 +530,37 @@ export default function CategoriesView() {
             onClick={() => setModalOpen(false)}
             className="absolute inset-0 bg-slate-950/40 backdrop-blur-sm"
           />
-          <div className="absolute inset-x-4 top-1/2 mx-auto max-w-lg -translate-y-1/2 rounded-2xl bg-white shadow-2xl">
-            <div className="max-h-[85vh] overflow-y-auto p-6">
-              <div className="flex items-start justify-between">
-                <h2 className="font-heading text-lg font-bold text-slate-900">
-                  {editingId ? "Edit Category" : "Add Category"}
-                </h2>
+          <div className="absolute inset-x-4 top-1/2 mx-auto max-w-2xl -translate-y-1/2 overflow-hidden rounded-3xl bg-white shadow-2xl">
+            <div className="relative flex max-h-[85vh] flex-col">
+              {/* Header band — live category identity */}
+              <div className="flex items-start justify-between gap-3 bg-gradient-to-r from-[#0F5132] to-emerald-700 px-6 py-5">
+                <div className="flex min-w-0 items-center gap-3.5">
+                  <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white/15 text-white">
+                    <HeaderIcon className="h-6 w-6" />
+                  </span>
+                  <div className="min-w-0">
+                    <h2 className="font-heading truncate text-lg font-bold text-white">
+                      {form.nameEn.trim() || (editingId ? "Edit Category" : "Add Category")}
+                    </h2>
+                    <p className="mt-0.5 text-xs text-emerald-100/80">
+                      {editingId ? "Citizen taxonomy & auto-routing rules" : "New citizen-facing hazard category"}
+                    </p>
+                  </div>
+                </div>
                 <button
                   type="button"
                   onClick={() => setModalOpen(false)}
                   aria-label="Close"
-                  className="rounded-lg p-1.5 text-slate-400 transition-colors duration-150 hover:bg-slate-100 hover:text-slate-900"
+                  className="rounded-lg p-1.5 text-white/70 transition-colors duration-150 hover:bg-white/10 hover:text-white"
                 >
                   <X className="h-5 w-5" />
                 </button>
               </div>
 
-              <div className="mt-5 space-y-4">
+              {/* Scrollable body */}
+              <div className="flex-1 space-y-6 overflow-y-auto px-6 py-6">
+                <section className="space-y-4">
+                  <SectionLabel>Identity</SectionLabel>
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div>
                     <label htmlFor="cat-name" className={`${labelClass} mb-1.5 block`}>
@@ -479,57 +611,176 @@ export default function CategoriesView() {
                   />
                 </div>
 
-                <div>
-                  <label htmlFor="cat-tags" className={`${labelClass} mb-1.5 block`}>
-                    Quick-Issue Tags
-                  </label>
-                  <input
-                    id="cat-tags"
-                    type="text"
-                    value={form.tagsInput}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, tagsInput: e.target.value }))
-                    }
-                    placeholder="e.g. Overflowing Dumpster, Dead Animal / Carcass"
-                    className={inputClass}
-                  />
-                  <p className="mt-1 text-[11px] text-slate-500">
-                    Comma-separated one-tap pills shown under this category in
-                    the reporting wizard (first 3 selections are kept).
-                  </p>
-                </div>
-
-                <div>
-                  <p className={`${labelClass} mb-1.5`}>Selectable Icon</p>
-                  <div
-                    role="radiogroup"
-                    aria-label="Category icon"
-                    className="grid grid-cols-6 gap-2"
-                  >
-                    {CATEGORY_ICON_KEYS.map((key) => {
-                      const Icon = categoryIcon(key);
-                      const selected = form.icon === key;
-                      return (
-                        <button
-                          key={key}
-                          type="button"
-                          role="radio"
-                          aria-checked={selected}
-                          aria-label={key}
-                          onClick={() => setForm((f) => ({ ...f, icon: key }))}
-                          className={`flex h-11 items-center justify-center rounded-xl border transition-colors duration-150 ${
-                            selected
-                              ? "border-emerald-700 bg-emerald-50 text-emerald-700"
-                              : "border-slate-200 text-slate-500 hover:border-emerald-300"
-                          }`}
-                        >
-                          <Icon className="h-4.5 w-4.5" />
-                        </button>
-                      );
-                    })}
+                  <div>
+                    <p className={`${labelClass} mb-1.5`}>Icon</p>
+                    <div
+                      role="radiogroup"
+                      aria-label="Category icon"
+                      className="grid grid-cols-9 gap-1.5"
+                    >
+                      {CATEGORY_ICON_KEYS.map((key) => {
+                        const Icon = categoryIcon(key);
+                        const selected = form.icon === key;
+                        return (
+                          <button
+                            key={key}
+                            type="button"
+                            role="radio"
+                            aria-checked={selected}
+                            aria-label={key}
+                            onClick={() => setForm((f) => ({ ...f, icon: key }))}
+                            className={`flex h-10 items-center justify-center rounded-lg border transition-colors duration-150 ${
+                              selected
+                                ? "border-emerald-700 bg-emerald-50 text-emerald-700"
+                                : "border-slate-200 text-slate-400 hover:border-emerald-300 hover:text-slate-600"
+                            }`}
+                          >
+                            <Icon className="h-4 w-4" />
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
+                </section>
 
+                <section className="space-y-3">
+                  <SectionLabel>Detailed Issue Menu</SectionLabel>
+                <div>
+                  {/* Collapsed summary — expand to view & edit the rows */}
+                  <button
+                    type="button"
+                    onClick={() => setMenuOpen((o) => !o)}
+                    aria-expanded={menuOpen}
+                    className="flex w-full items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm font-bold text-slate-900 transition-colors hover:border-emerald-300"
+                  >
+                    <span className="flex min-w-0 items-center gap-2">
+                      <ListFilter className="h-4 w-4 shrink-0 text-emerald-700" />
+                      <span className="min-w-0 truncate">
+                        {form.subIssues.length > 0
+                          ? `${form.subIssues.length} issues in the citizen menu`
+                          : "No detailed issues yet"}
+                      </span>
+                    </span>
+                    <ChevronDown
+                      className={`h-4 w-4 shrink-0 text-slate-400 transition-transform duration-200 ${
+                        menuOpen ? "rotate-180" : ""
+                      }`}
+                    />
+                  </button>
+
+                  {menuOpen && (
+                    <div className="mt-2 space-y-3 rounded-xl border border-slate-200 bg-canvas/50 p-3">
+                  {form.subIssues.length > 0 ? (
+                    <div className="space-y-2">
+                      {form.subIssues.map((row, index) => (
+                        <div key={index} className="flex items-center gap-2">
+                          <input
+                            value={row.en}
+                            onChange={(e) =>
+                              setIssueRow(index, { en: e.target.value })
+                            }
+                            placeholder="Issue (English)"
+                            aria-label={`Issue ${index + 1} — English`}
+                            className={`${inputClass} min-w-0 flex-1`}
+                          />
+                          <input
+                            value={row.ur}
+                            onChange={(e) =>
+                              setIssueRow(index, { ur: e.target.value })
+                            }
+                            placeholder="اردو"
+                            dir="rtl"
+                            aria-label={`Issue ${index + 1} — Urdu`}
+                            className={`${inputClass} urdu w-36 shrink-0 sm:w-44`}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => removeIssueRow(index)}
+                            aria-label={`Remove issue ${index + 1}`}
+                            className="shrink-0 rounded-lg border border-slate-200 p-2 text-slate-400 transition-colors hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="rounded-btn border border-dashed border-line bg-canvas px-3 py-3 text-center text-xs text-ink-muted">
+                      No detailed issues yet — citizens go straight from
+                      category to evidence. Add rows below or load the built-in
+                      list.
+                    </p>
+                  )}
+
+                  {/* Append row */}
+                  <div className="mt-2 flex items-center gap-2">
+                    <input
+                      value={newIssue.en}
+                      onChange={(e) =>
+                        setNewIssue((n) => ({ ...n, en: e.target.value }))
+                      }
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          addIssueRow();
+                        }
+                      }}
+                      placeholder="Add a detailed issue…"
+                      aria-label="New issue — English"
+                      className={`${inputClass} min-w-0 flex-1`}
+                    />
+                    <input
+                      value={newIssue.ur}
+                      onChange={(e) =>
+                        setNewIssue((n) => ({ ...n, ur: e.target.value }))
+                      }
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          addIssueRow();
+                        }
+                      }}
+                      placeholder="اردو"
+                      dir="rtl"
+                      aria-label="New issue — Urdu"
+                      className={`${inputClass} urdu w-36 shrink-0 sm:w-44`}
+                    />
+                    <button
+                      type="button"
+                      onClick={addIssueRow}
+                      aria-label="Add issue to menu"
+                      className="shrink-0 rounded-lg border border-emerald-200 bg-emerald-50 p-2 text-emerald-700 transition-colors hover:bg-emerald-100"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                    </button>
+                      </div>
+                    </div>
+                  )}
+
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Leave empty to use the built-in list. Shown in the
+                    reporting wizard, the review step and the ledger's tag
+                    column.
+                  </p>
+                  {!form.subIssues.length && editingId && SUB_ISSUES[editingId] && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setForm((f) => ({
+                          ...f,
+                          subIssues: SUB_ISSUES[editingId].map(splitIssue),
+                        }))
+                      }
+                      className="mt-1.5 inline-flex items-center gap-1 rounded-lg border border-line bg-white px-2.5 py-1 text-[11px] font-bold text-slate-700 transition-colors hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-800"
+                    >
+                      Load built-in list
+                    </button>
+                  )}
+                </div>
+                </section>
+
+                <section className="space-y-4">
+                  <SectionLabel>Routing &amp; SLA</SectionLabel>
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div>
                     <label
@@ -610,6 +861,10 @@ export default function CategoriesView() {
                   />
                 </div>
 
+                </section>
+
+                <section className="space-y-4">
+                  <SectionLabel>Availability</SectionLabel>
                 {/* City scope */}
                 <div className="rounded-xl border border-slate-200/80 p-3.5">
                   <div className="flex items-center justify-between gap-2">
@@ -750,31 +1005,102 @@ export default function CategoriesView() {
                   </button>
                 </div>
 
-                {formError && (
-                  <p className="flex items-center gap-1.5 text-xs font-medium text-rose-600">
-                    <AlertTriangle className="h-3.5 w-3.5" />
-                    {formError}
-                  </p>
+                {/* Danger zone — delete this category */}
+                {editingId && (
+                  <div className="flex items-center justify-between gap-3 rounded-xl border border-rose-200/70 bg-rose-50/50 px-3.5 py-3">
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-rose-900">
+                        Delete this category
+                      </p>
+                      <p className="mt-0.5 text-[11px] leading-4 text-rose-700/80">
+                        Removes it from citizen forms and the reporting wizard.
+                        This cannot be undone.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDeleteInModal(true)}
+                      className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border border-rose-300 bg-white px-3 py-2 text-xs font-bold text-rose-600 transition-colors duration-150 hover:border-rose-400 hover:bg-rose-100"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Delete Category
+                    </button>
+                  </div>
                 )}
+                </section>
               </div>
 
-              <div className="mt-6 flex items-center justify-end gap-2 border-t border-slate-100 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setModalOpen(false)}
-                  className="whitespace-nowrap rounded-xl px-5 py-2.5 text-sm font-semibold text-slate-600 transition-colors duration-150 hover:bg-slate-100 hover:text-slate-900"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={save}
-                  disabled={!form.nameEn.trim()}
-                  className="flex items-center gap-2 whitespace-nowrap rounded-xl bg-emerald-800 px-5 py-2.5 text-sm font-semibold text-white transition-colors duration-150 hover:bg-emerald-900 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <Save className="h-4 w-4" />
-                  Save Category
-                </button>
+              {/* Delete confirmation — overlay dialog: nothing underneath
+                  moves, so confirming can never shift the layout */}
+              {confirmDeleteInModal && editingId && (
+                <div className="absolute inset-0 z-10 flex items-center justify-center bg-rose-950/25 p-6 backdrop-blur-[2px]">
+                  <div className="w-full max-w-sm rounded-2xl border border-rose-200 bg-white p-5 shadow-xl">
+                    <div className="flex items-start gap-3">
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-rose-100 text-rose-600">
+                        <AlertTriangle className="h-4.5 w-4.5" />
+                      </span>
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-slate-900">
+                          Delete “{form.nameEn.trim() || "this category"}” permanently?
+                        </p>
+                        <p className="mt-1 text-xs leading-5 text-slate-500">
+                          It disappears from citizen forms and the reporting
+                          wizard immediately, and its detailed issue menu is
+                          removed. Reports already filed keep their stored
+                          category name. This cannot be undone.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="mt-4 flex items-center justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDeleteInModal(false)}
+                        className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-600 transition-colors duration-150 hover:border-slate-300 hover:text-slate-900"
+                      >
+                        Keep Category
+                      </button>
+                      <button
+                        type="button"
+                        onClick={deleteFromModal}
+                        className="rounded-xl bg-rose-600 px-4 py-2 text-xs font-bold text-white shadow-sm transition-colors duration-150 hover:bg-rose-700"
+                      >
+                        Delete Permanently
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Pinned footer */}
+              <div className="flex items-center gap-3 border-t border-slate-100 bg-slate-50/70 px-6 py-4">
+                {formError ? (
+                  <p className="flex min-w-0 flex-1 items-center gap-1.5 text-xs font-medium text-rose-600">
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate">{formError}</span>
+                  </p>
+                ) : (
+                  <p className="min-w-0 flex-1 truncate text-[11px] text-slate-400">
+                    Changes apply to citizen forms immediately after saving.
+                  </p>
+                )}
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setModalOpen(false)}
+                    className="whitespace-nowrap rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-600 transition-colors duration-150 hover:border-slate-300 hover:text-slate-900"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={save}
+                    disabled={!form.nameEn.trim()}
+                    className="flex items-center gap-2 whitespace-nowrap rounded-xl bg-emerald-800 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors duration-150 hover:bg-emerald-900 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Save className="h-4 w-4" />
+                    Save Category
+                  </button>
+                </div>
               </div>
             </div>
           </div>

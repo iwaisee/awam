@@ -1,5 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import { Camera, ShieldCheck } from "lucide-react";
+import type { CoreSector, FieldSquad } from "@/data/departmentRegistry";
 import type { IncidentReport } from "@/types/civic";
 
 /* ----------------------------------------------------------------------------
@@ -189,6 +190,96 @@ export function normalizeToken(raw: string): string {
   return raw.trim().replace(/^#/, "").toUpperCase();
 }
 
+/* ------------------------- Actual assignment lookup ------------------------- */
+
+/** The real desk behind a ticket, read from the departments registry: the
+    assigned crew's own record when one is attached, otherwise the agency's
+    desk in the ticket's district (or anywhere the agency operates). Pure —
+    callers supply the registry snapshot; null means the registry does not
+    cover this agency and the static desk directory should render instead. */
+export interface RegistryAssignment {
+  leadTechnician: string;
+  squadPhone: string;
+  divisionName: string;
+  managerName: string;
+  managerDesignation: string;
+  officialPhone: string;
+  controlRoomHotline: string;
+  agencyFullName: string;
+  headquarters: string;
+  hqAddress?: string;
+}
+
+export function resolveRegistryAssignment(
+  sectors: CoreSector[],
+  assignedAgency: string,
+  assignedUnit?: string,
+  cityName?: string,
+): RegistryAssignment | null {
+  const unit = assignedUnit?.trim().toLowerCase();
+  const city = cityName?.trim().toLowerCase();
+  if (!unit && !assignedAgency.trim()) return null;
+  const matchesAgency = (code: string) => {
+    const a = code.trim().toLowerCase();
+    const b = assignedAgency.trim().toLowerCase();
+    return Boolean(b) && (a === b || a.startsWith(b) || b.startsWith(a));
+  };
+
+  let byUnit: RegistryAssignment | null = null;
+  let byAgencyLocal: RegistryAssignment | null = null;
+  let byAgencyAny: RegistryAssignment | null = null;
+  let byAgencyHQ: RegistryAssignment | null = null;
+  for (const sector of sectors) {
+    for (const agency of sector.agencies) {
+      const agencyHit = matchesAgency(agency.code);
+      if (agencyHit && !byAgencyHQ) {
+        // The agency is registered even if it has no division desks yet —
+        // its own headquarters is still real data worth showing.
+        byAgencyHQ = {
+          leadTechnician: "",
+          squadPhone: "",
+          divisionName: "",
+          managerName: "",
+          managerDesignation: "",
+          officialPhone: "",
+          controlRoomHotline: "",
+          agencyFullName: agency.fullName,
+          headquarters: agency.headquarters,
+          ...(agency.hqAddress ? { hqAddress: agency.hqAddress } : {}),
+        };
+      }
+      for (const op of agency.districtOperations) {
+        const flat = (squad?: FieldSquad): RegistryAssignment => ({
+          leadTechnician: squad?.leadTechnician ?? "",
+          squadPhone: squad?.phone ?? "",
+          divisionName: op.divisionName,
+          managerName: op.managerName,
+          managerDesignation: op.managerDesignation,
+          officialPhone: op.officialPhone,
+          controlRoomHotline: op.controlRoomHotline,
+          agencyFullName: agency.fullName,
+          headquarters: agency.headquarters,
+          ...(agency.hqAddress ? { hqAddress: agency.hqAddress } : {}),
+        });
+        if (agencyHit) {
+          if (!byAgencyLocal && city && op.district.trim().toLowerCase() === city)
+            byAgencyLocal = flat();
+          if (!byAgencyAny) byAgencyAny = flat();
+        }
+        if (!byUnit && unit) {
+          for (const squad of op.squads) {
+            if (squad.name.trim().toLowerCase() === unit) {
+              byUnit = flat(squad);
+              break;
+            }
+          }
+        }
+      }
+    }
+  }
+  return byUnit ?? byAgencyLocal ?? byAgencyAny ?? byAgencyHQ;
+}
+
 /** "+92 300 1234567" / "0300-1234567" / "923001234567" → "3001234567". */
 export function normalizePhone(raw: string): string {
   const digits = raw.replace(/\D/g, "");
@@ -231,7 +322,10 @@ const LIVE_URGENCY: Record<
   routine: { label: "Routine (P3)", tone: "slate" },
 };
 
-export function dossierFromReport(r: IncidentReport): TrackDossier {
+export function dossierFromReport(
+  r: IncidentReport,
+  assignment?: RegistryAssignment | null,
+): TrackDossier {
   const created = new Date(r.created_at).getTime();
   const deadline = new Date(r.sla_deadline).getTime();
   const dispatchedAt = r.dispatched_at
@@ -247,6 +341,38 @@ export function dossierFromReport(r: IncidentReport): TrackDossier {
     phone: "052-9250200",
     hours: "9 AM – 5 PM",
   };
+  /* The registry's record of this ticket's desk wins over the static
+     directory: the division manager is the supervisor of record, the agency's
+     own headquarters is the office, and the division's official line is the
+     number a citizen actually dials. The static desk is the fallback for
+     agencies the registry does not cover. */
+  const officerParts = assignment
+    ? [assignment.managerName, assignment.managerDesignation].filter((p) =>
+        p.trim(),
+      )
+    : [];
+  const officer =
+    (officerParts.length > 0
+      ? officerParts.join(" — ")
+      : assignment?.leadTechnician.trim()) || desk.officer;
+
+  const officePlace = assignment
+    ? assignment.hqAddress?.trim() || assignment.headquarters.trim()
+    : desk.office;
+  /* A registry address already names its city (it carries commas); the short
+     static office labels are the ones that need the city appended. */
+  const office =
+    officePlace &&
+    (officePlace.includes(",") ||
+    officePlace.toLowerCase().includes(r.city_name.trim().toLowerCase())
+      ? officePlace
+      : `${officePlace}, ${r.city_name}`);
+
+  const deskPhone =
+    assignment?.officialPhone.trim() ||
+    assignment?.controlRoomHotline.trim() ||
+    assignment?.squadPhone.trim() ||
+    desk.phone;
   const status = LIVE_STATUS[r.status];
   const urgency = LIVE_URGENCY[r.urgency];
   const reported = `${dayLabel(created)}, ${fmtClock(created)}`;
@@ -373,7 +499,10 @@ export function dossierFromReport(r: IncidentReport): TrackDossier {
 
   return {
     token: normalizeToken(r.tracking_token || r.id),
-    title: r.category_title,
+    // The citizen's own headline leads; the category label is only a fallback
+    // for rows filed before the title field existed (the category keeps its
+    // own capsule below the headline either way).
+    title: r.title?.trim() || r.category_title,
     description: r.description,
     category: r.category_title,
     statusLabel: status.label,
@@ -388,13 +517,16 @@ export function dossierFromReport(r: IncidentReport): TrackDossier {
     geo: r.coordinates ?? undefined,
     landmark: r.description,
     agency: r.assigned_agency,
-    office: `${desk.office}, ${r.city_name}`,
-    officer: desk.officer,
-    deskPhone: desk.phone,
+    office,
+    officer,
+    deskPhone,
     deskHours: desk.hours,
-    deskShort: `${r.assigned_agency} Sub-Division`,
-    deskLocation: desk.office,
-    squad: r.assigned_unit ?? undefined,
+    deskShort: assignment?.divisionName.trim() || `${r.assigned_agency} Sub-Division`,
+    deskLocation: office,
+    /* A crew auto-attached at filing is a dispatch reservation, not an
+       assignment — until the ticket leaves triage the citizen-facing card
+       must not claim a squad. */
+    squad: r.assigned_unit && r.status !== "triage" ? r.assigned_unit : undefined,
     sla: {
       createdAtMs: created,
       deadlineMs: deadline,

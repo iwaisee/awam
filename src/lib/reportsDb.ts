@@ -181,8 +181,6 @@ export interface ReportPatch {
   assigned_unit?: string;
   assigned_agency?: string;
   urgency?: IncidentReport["urgency"];
-  /** Citizen "confirm issue still present" — increments upvotes by 1. */
-  upvote?: boolean;
   clearDispatchTelemetry?: boolean;
   stampDispatch?: boolean;
   stampResolved?: boolean;
@@ -227,7 +225,6 @@ export async function patchReport(
   if (patch.stampDispatch && !existing.dispatched_at) {
     set("dispatched_at", "dispatched_at = ?", new Date().toISOString());
   }
-  if (patch.upvote) set("upvotes", "upvotes = upvotes + 1");
   if (patch.status === "resolved") {
     // Re-resolving keeps the original stamp; a fresh resolution gets one.
     if (!existing.resolved_at) {
@@ -272,6 +269,99 @@ export async function patchReport(
     await deleteImage(retired);
   }
   return updated;
+}
+
+/* ------------------------------ Citizen voting -----------------------------
+   One confirmation per account per ticket. The report_votes PRIMARY KEY is
+   the anti-inflation rule: a duplicate vote inserts nothing, so the counter
+   cannot be pushed past one per account no matter how often the client asks. */
+
+export interface ReportVoteResult {
+  report: IncidentReport;
+  /** The account's vote state after the toggle — the client renders from this. */
+  voted: boolean;
+}
+
+/** Cast (`vote: true`) or retract (`vote: false`) one account's confirmation.
+    The counter move and the vote row change share one statement (CTE), so a
+    vote that already exists / a retraction with nothing to remove adjusts
+    nothing — idempotent under double-clicks, replays, and races. */
+export async function toggleReportVote(
+  reportId: string,
+  userId: string,
+  vote: boolean,
+): Promise<ReportVoteResult | null> {
+  await ensureSchema();
+  const sql = vote
+    ? `WITH vote AS (
+         INSERT INTO report_votes (report_id, user_id) VALUES ($1, $2)
+         ON CONFLICT DO NOTHING
+         RETURNING 1
+       )
+       UPDATE reports SET upvotes = upvotes + 1
+       WHERE id = $1 AND EXISTS (SELECT 1 FROM vote)
+       RETURNING upvotes`
+    : `WITH retraction AS (
+         DELETE FROM report_votes WHERE report_id = $1 AND user_id = $2
+         RETURNING 1
+       )
+       UPDATE reports SET upvotes = GREATEST(upvotes - 1, 0)
+       WHERE id = $1 AND EXISTS (SELECT 1 FROM retraction)
+       RETURNING upvotes`;
+  await query(sql, [reportId, userId]);
+
+  const report = await getReportByIdOrToken(reportId);
+  if (!report) return null;
+  const rows = await query(
+    "SELECT 1 FROM report_votes WHERE report_id = $1 AND user_id = $2 LIMIT 1",
+    [reportId, userId],
+  );
+  return { report, voted: rows.length > 0 };
+}
+
+/** The account's confirmed tickets, as tracking tokens — the feed's card ids.
+    Powers the pressed state of vote buttons after a reload. */
+export async function listReportVotes(userId: string): Promise<string[]> {
+  await ensureSchema();
+  const rows = await query<{ tracking_token: string }>(
+    `SELECT r.tracking_token FROM report_votes v
+     JOIN reports r ON r.id = v.report_id
+     WHERE v.user_id = $1`,
+    [userId],
+  );
+  return rows.map((row) => String(row.tracking_token));
+}
+
+/* ------------------------- Resolution email alerts ------------------------- */
+
+/** The account's "email me when this ticket is resolved" switch. Absent row
+    means off — the default for a ticket the account never watched. */
+export async function getReportEmailAlert(
+  reportId: string,
+  userId: string,
+): Promise<boolean> {
+  await ensureSchema();
+  const rows = await query<{ email_on_resolve: boolean }>(
+    "SELECT email_on_resolve FROM report_alerts WHERE report_id = $1 AND user_id = $2 LIMIT 1",
+    [reportId, userId],
+  );
+  return rows[0]?.email_on_resolve === true;
+}
+
+/** Upsert the switch. The caller resolves the ticket id canonically first. */
+export async function setReportEmailAlert(
+  reportId: string,
+  userId: string,
+  enabled: boolean,
+): Promise<void> {
+  await ensureSchema();
+  await query(
+    `INSERT INTO report_alerts (report_id, user_id, email_on_resolve)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (report_id, user_id)
+     DO UPDATE SET email_on_resolve = EXCLUDED.email_on_resolve`,
+    [reportId, userId, enabled],
+  );
 }
 
 /** Remove a ticket from the ledger outright, returning the row that went so the

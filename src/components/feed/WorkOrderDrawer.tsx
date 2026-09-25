@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ArrowBigUp,
@@ -22,12 +22,14 @@ import {
 import {
   dossierFromReport,
   normalizeToken,
+  resolveRegistryAssignment,
   slaProgressPct,
   slaRemainingLabel,
   spanLabel,
   type TrackDossier,
   type TrackStep,
 } from "@/lib/trackDossiers";
+import { useDepartmentRegistry } from "@/hooks/useDepartmentRegistry";
 import type { IncidentReport } from "@/types/civic";
 
 /* ----------------------------------------------------------------------------
@@ -92,7 +94,27 @@ export default function WorkOrderDrawer({
 }) {
   const isOpen = token !== null;
 
-  const [dossier, setDossier] = useState<TrackDossier | null>(null);
+  // The dossier is derived from the ledger row plus the departments registry,
+  // so the assignment card carries the real desk and rebuilds when the
+  // registry syncs.
+  const [dossierSource, setDossierSource] = useState<IncidentReport | null>(
+    null,
+  );
+  const { sectors } = useDepartmentRegistry();
+  const dossier = useMemo(() => {
+    if (!dossierSource) return null;
+    return dossierFromReport(
+      dossierSource,
+      resolveRegistryAssignment(
+        sectors,
+        dossierSource.assigned_agency,
+        // In triage the crew attachment is only a reservation — show the
+        // agency's own desk, not the provisional crew's chain of command.
+        dossierSource.status === "triage" ? undefined : dossierSource.assigned_unit,
+        dossierSource.city_name,
+      ),
+    );
+  }, [dossierSource, sectors]);
   const [loading, setLoading] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const [copied, setCopied] = useState(false);
@@ -191,7 +213,7 @@ export default function WorkOrderDrawer({
       if (cancelled) return;
       setLastToken(token);
       setLoading(true);
-      setDossier(null);
+      setDossierSource(null);
       try {
         const response = await fetch("/api/reports", { cache: "no-store" });
         const data: unknown = await response.json();
@@ -203,7 +225,7 @@ export default function WorkOrderDrawer({
             normalizeToken(r.id) === wanted,
         );
         if (live && !cancelled) {
-          setDossier(dossierFromReport(live));
+          setDossierSource(live);
         }
       } catch {
         /* fall through to not-found */
@@ -214,6 +236,44 @@ export default function WorkOrderDrawer({
       cancelled = true;
     };
   }, [token]);
+
+  /* Live drawer — while a ticket is open, its ledger row is re-polled so a
+     squad assignment or status change made in the console shows up without
+     closing the drawer. The state only moves when the row changed. */
+  const openToken = token ? normalizeToken(token) : null;
+  useEffect(() => {
+    if (!openToken) return;
+    let cancelled = false;
+    const poll = () => {
+      void (async () => {
+        try {
+          const response = await fetch("/api/reports", { cache: "no-store" });
+          const data: unknown = await response.json();
+          const fresh = Array.isArray(data)
+            ? (data as IncidentReport[]).find(
+                (r) =>
+                  normalizeToken(r.tracking_token) === openToken ||
+                  normalizeToken(r.id) === openToken,
+              )
+            : null;
+          if (!cancelled && fresh) {
+            setDossierSource((prev) =>
+              prev && JSON.stringify(prev) === JSON.stringify(fresh)
+                ? prev
+                : fresh,
+            );
+          }
+        } catch {
+          // Ledger unreachable — keep the last known state.
+        }
+      })();
+    };
+    const timer = window.setInterval(poll, 15_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [openToken]);
 
   if (!displayToken) return null;
 
@@ -613,20 +673,22 @@ export default function WorkOrderDrawer({
                     </>
                   )}
 
-                  {dossier.squad && (
-                    <>
-                      <div className="border-t border-dashed border-slate-300/70" />
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-amber-900/70">
-                          <HardHat className="h-3.5 w-3.5 shrink-0 text-amber-800" />
-                          <span>Assigned Squad</span>
-                        </div>
-                        <div className="break-words pl-5 text-xs font-semibold leading-snug text-slate-800">
-                          {dossier.squad}
-                        </div>
+                  <div className="border-t border-dashed border-slate-300/70" />
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-amber-900/70">
+                      <HardHat className="h-3.5 w-3.5 shrink-0 text-amber-800" />
+                      <span>Assigned Squad</span>
+                    </div>
+                    {dossier.squad ? (
+                      <div className="break-words pl-5 text-xs font-semibold leading-snug text-slate-800">
+                        {dossier.squad}
                       </div>
-                    </>
-                  )}
+                    ) : (
+                      <div className="break-words pl-5 text-xs font-medium leading-snug text-slate-400">
+                        Will be assigned at dispatch
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* Ghost call button — themed to the card state */}
@@ -642,7 +704,7 @@ export default function WorkOrderDrawer({
                     className={`h-3.5 w-3.5 ${isResolved ? "text-emerald-800" : "text-amber-800"}`}
                   />
                   <span>
-                    Call SDO Desk: {dossier.deskPhone} ({dossier.deskHours})
+                    Call Desk: {dossier.deskPhone} ({dossier.deskHours})
                   </span>
                 </a>
               </div>

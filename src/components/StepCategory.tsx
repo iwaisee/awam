@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { AlertTriangle, Check, Layers, Plus } from "lucide-react";
+import { AlertTriangle, Check, Layers } from "lucide-react";
 import { useCoverage } from "@/context/CoverageContext";
 import { categoryIcon } from "@/lib/categoryIcons";
 import { DEFAULT_JURISDICTION, shortJurisdiction } from "@/types/civic";
@@ -16,19 +16,11 @@ interface StepCategoryProps {
   updateForm: (patch: Partial<ReportFormData>) => void;
 }
 
-/** One-tap quick-issue pills allowed per report. */
-const MAX_TAGS = 3;
-
 const URGENCY_CHIP: Record<string, string> = {
   emergency: "bg-danger-tint text-danger",
   high: "bg-warning-tint text-warning",
   routine: "bg-primary-tint text-primary",
 };
-
-const TAG_PILL_UNSELECTED =
-  "flex cursor-pointer items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-2xs transition-all hover:bg-slate-50 active:scale-95";
-const TAG_PILL_SELECTED =
-  "flex cursor-pointer items-center gap-1.5 rounded-full border border-[#0F5132] bg-[#0F5132] px-3 py-1.5 text-xs font-semibold text-white shadow-xs transition-all hover:bg-emerald-900 active:scale-95";
 
 export default function StepCategory({ formData, updateForm }: StepCategoryProps) {
   const { cities, categories } = useCoverage();
@@ -81,24 +73,14 @@ export default function StepCategory({ formData, updateForm }: StepCategoryProps
             const Icon = categoryIcon(category.icon_name);
             const selected = formData.category === category.id;
             const toggleCategory = () => {
-              // Tapping the active card deselects it; switching cards (or
-              // deselecting) always resets the pills so tags can never
-              // mismatch the routing category.
+              // Tapping the active card deselects it; switching cards always
+              // resets the detailed-issue choice so it can never mismatch the
+              // routing category.
               updateForm(
                 selected
                   ? { category: null, selectedTags: [] }
                   : { category: category.id, selectedTags: [] }
               );
-            };
-            const toggleTag = (tag: string) => {
-              const current = formData.selectedTags;
-              updateForm({
-                selectedTags: current.includes(tag)
-                  ? current.filter((t) => t !== tag)
-                  : current.length >= MAX_TAGS
-                    ? current
-                    : [...current, tag],
-              });
             };
             return (
               <div
@@ -153,59 +135,6 @@ export default function StepCategory({ formData, updateForm }: StepCategoryProps
                     SLA {category.sla_hours}h
                   </span>
                 </div>
-
-                {/* Expandable quick-issue tag tray */}
-                {category.tags.length > 0 && (
-                  <div
-                    aria-hidden={!selected}
-                    className={`grid transition-all duration-300 ease-in-out ${
-                      selected
-                        ? "grid-rows-[1fr] opacity-100"
-                        : "grid-rows-[0fr] opacity-0"
-                    }`}
-                  >
-                    <div className="overflow-hidden">
-                      <div className="mt-3 rounded-xl border border-emerald-200/60 bg-white/80 p-3">
-                        <p className="text-xs font-semibold text-slate-700">
-                          Tap relevant issue tags{" "}
-                          <span className="font-normal text-slate-400">
-                            (Optional, up to {MAX_TAGS}):
-                          </span>
-                        </p>
-                        <p className="urdu mt-0.5 text-[11px] text-slate-500">
-                          مسئلے کی درست نشاندہی کے لیے ٹیگ منتخب کریں
-                        </p>
-                        <div className="flex flex-wrap gap-2 pt-2.5">
-                          {category.tags.map((tag) => {
-                            const active = formData.selectedTags.includes(tag);
-                            return (
-                              <button
-                                key={tag}
-                                type="button"
-                                aria-pressed={active}
-                                onClick={(e) => {
-                                  // Pills must not re-trigger the card select.
-                                  e.stopPropagation();
-                                  toggleTag(tag);
-                                }}
-                                className={
-                                  active ? TAG_PILL_SELECTED : TAG_PILL_UNSELECTED
-                                }
-                              >
-                                {active ? (
-                                  <Check className="h-3 w-3" strokeWidth={3} />
-                                ) : (
-                                  <Plus className="h-3 w-3" />
-                                )}
-                                {tag}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
               </div>
             );
           })}

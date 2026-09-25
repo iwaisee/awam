@@ -10,7 +10,9 @@ import type { IncidentReport } from "@/types/civic";
    report-listing surface: the community feed, the settings "My Reports" tab
    and the citizen workspace. One mapper, one fetch hook — no per-view copies. */
 
-/** Card title — falls back to the first clause of the citizen narrative. */
+/** Card title — falls back to the first clause of the citizen narrative.
+    Only a fallback: the wizard's step-3 headline (`title`) is the real title,
+    and rows filed before that field existed have none. */
 export function reportTitle(report: IncidentReport): string {
   return report.description.split("—")[0].trim();
 }
@@ -63,13 +65,17 @@ export function toFeedReport(report: IncidentReport, now: number): FeedReport {
 
   return {
     id: report.tracking_token,
-    title: reportTitle(report),
+    title: report.title?.trim() || reportTitle(report),
     description: report.description,
     landmark: report.area_name,
     city: report.city_name,
     area: report.city_name,
     category: report.category_id as CategoryId,
-    categoryTag: `#${(report.selected_tags?.[0] ?? report.category_title ?? report.category_id).replace(/\s+/g, "")}`,
+    categoryTag: `#${(report.selected_tags?.[0] ?? report.category_title ?? report.category_id)
+      // Sub-issues carry inline Urdu ("Heaps of Garbage (کچرے کے ڈھیر)") —
+      // the hashtag chip shows the English head only.
+      .split("(")[0]
+      .replace(/\s+/g, "")}`,
     agency: agencyCode(report.assigned_agency),
     status,
     statusLabel: resolved

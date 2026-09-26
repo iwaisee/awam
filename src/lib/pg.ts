@@ -486,6 +486,27 @@ CREATE TABLE IF NOT EXISTS squads (
   active_tickets INTEGER,
   sort INTEGER NOT NULL DEFAULT 0
 );
+
+/* --------------------- Registry JSONB array repair -------------------------
+   An earlier registry write path JSON.stringify'd the array payloads before
+   the jsonb_to_recordset insert, so jurisdiction_districts / coverage / wards
+   were stored as JSON string scalars ('"[...]"') instead of arrays — every
+   reader then saw empty rosters (agency "N Cities" bubbles stuck at 0).
+   Unwrap any string-encoded array once. The LIKE guard keeps non-array
+   strings (free-text values) safe from the ::jsonb cast; both statements
+   self-disable once the data is normalized. */
+DO $$
+BEGIN
+  UPDATE agencies SET jurisdiction_districts = (jurisdiction_districts #>> '{}')::jsonb
+   WHERE jsonb_typeof(jurisdiction_districts) = 'string'
+     AND (jurisdiction_districts #>> '{}') LIKE '[%';
+  UPDATE divisions SET coverage = (coverage #>> '{}')::jsonb
+   WHERE jsonb_typeof(coverage) = 'string'
+     AND (coverage #>> '{}') LIKE '[%';
+  UPDATE squads SET wards = (wards #>> '{}')::jsonb
+   WHERE jsonb_typeof(wards) = 'string'
+     AND (wards #>> '{}') LIKE '[%';
+END $$;
 `;
 
 /** Create every table, keyed by the DDL text that was applied. A long-lived dev

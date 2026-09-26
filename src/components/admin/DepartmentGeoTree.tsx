@@ -10,9 +10,10 @@
 
 import { useMemo, useState } from "react";
 import { Building2, ChevronRight, LayoutGrid, Map as MapIcon } from "lucide-react";
-import type {
-  CoreSector,
-  RegionalAgency,
+import {
+  agencyCoverageDistricts,
+  type CoreSector,
+  type RegionalAgency,
 } from "@/data/departmentRegistry";
 import { SECTOR_ACCENTS, SECTOR_ICONS, SECTOR_ICON_FALLBACK } from "./sectorIcons";
 
@@ -65,7 +66,9 @@ function buildGeoIndex(sectors: CoreSector[]): GeoProvince[] {
       if (!province) continue;
       if (!provinces.has(province)) provinces.set(province, new Map());
       const districts = provinces.get(province)!;
-      for (const district of agency.jurisdictionDistricts) {
+      /* Coverage union — declared jurisdiction plus districts with a deployed
+         desk, so a desk without a jurisdiction entry still surfaces here. */
+      for (const district of agencyCoverageDistricts(agency)) {
         const key = district.toLowerCase();
         if (!districts.has(key)) {
           districts.set(key, { name: district, leaves: new Map() });

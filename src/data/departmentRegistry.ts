@@ -168,6 +168,24 @@ export interface CoreSector {
 }
 
 
+/** Districts an agency answers for — the union of its declared jurisdiction
+    list and the districts where it actually runs an operational desk. Desks
+    deployed before the jurisdiction list was filled in still count, so
+    coverage bubbles and the geo tree never under-report active cities. */
+export function agencyCoverageDistricts(agency: RegionalAgency): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const push = (name: string) => {
+    const key = name.trim().toLowerCase();
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    out.push(name.trim());
+  };
+  for (const district of agency.jurisdictionDistricts) push(district);
+  for (const op of agency.districtOperations) push(op.district);
+  return out;
+}
+
 /* ------------------------------ Geo roll-ups ------------------------------ */
 /* Territory surfaces ask the registry geographic questions ("which desks work
    here?"). These four helpers are the single answer — the province focus deck,

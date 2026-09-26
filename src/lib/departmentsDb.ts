@@ -48,11 +48,22 @@ const nulInt = (row: Row, key: string): number | null => {
   return n === null ? null : Math.round(n);
 };
 
-const nulJson = (value: unknown): string | null =>
-  value === null || value === undefined ? null : JSON.stringify(value);
-
-const jsonArray = (value: unknown): string[] =>
-  Array.isArray(value) ? value.map(String) : [];
+/** JSONB column → string array. Tolerates rows stored as double-encoded JSON
+    strings — an earlier write path pre-stringified the array before the
+    jsonb_to_recordset insert, so the column held the scalar '"[...]"' and
+    every reader saw an empty roster. */
+const jsonArray = (value: unknown): string[] => {
+  if (Array.isArray(value)) return value.map(String);
+  if (typeof value === "string") {
+    try {
+      const parsed: unknown = JSON.parse(value);
+      if (Array.isArray(parsed)) return parsed.map(String);
+    } catch {
+      /* fall through to the empty default */
+    }
+  }
+  return [];
+};
 
 const nulBool = (row: Row, key: string): boolean | null => {
   const value = row[key];
@@ -242,7 +253,7 @@ export async function writeRegistry(data: unknown): Promise<void> {
             hq_address: nulStr(agency, "hqAddress"),
             descriptor: str(agency, "descriptor"),
             province: str(agency, "province") || "Punjab",
-            jurisdiction_districts: nulJson(agency.jurisdictionDistricts) ?? "[]",
+            jurisdiction_districts: jsonArray(agency.jurisdictionDistricts),
             status: str(agency, "status") || "active",
             control_hotline: nulStr(agency, "controlHotline"),
             dispatch_email: nulStr(agency, "dispatchEmail"),
@@ -308,7 +319,7 @@ export async function writeRegistry(data: unknown): Promise<void> {
                 official_phone: str(division, "officialPhone"),
                 official_extension: nulStr(division, "officialExtension"),
                 control_room_hotline: str(division, "controlRoomHotline"),
-                coverage: nulJson(division.coverage) ?? "[]",
+                coverage: jsonArray(division.coverage),
                 open_tickets: nulInt(division, "openTickets") ?? 0,
                 resolved_tickets: nulInt(division, "resolvedTickets") ?? 0,
                 total_squads_deployed: nulInt(division, "totalSquadsDeployed") ?? 0,
@@ -373,7 +384,7 @@ export async function writeRegistry(data: unknown): Promise<void> {
                     role_class: nulStr(squad, "roleClass"),
                     shift: nulStr(squad, "shift"),
                     vehicle_plate: nulStr(squad, "vehiclePlate"),
-                    wards: nulJson(squad.wards) ?? "[]",
+                    wards: jsonArray(squad.wards),
                     active_tickets: nulInt(squad, "activeTickets"),
                     sort,
                   }));

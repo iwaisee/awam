@@ -49,6 +49,7 @@ import {
   PROVINCE_OPTIONS,
   SECTOR_WORKFORCE,
   SQUAD_SHIFTS,
+  agencyCoverageDistricts,
   type CoreSector,
   type DistrictOperation,
   type FieldSquad,
@@ -653,6 +654,8 @@ type AgencyFormState = {
   code: string;
   fullName: string;
   headquarters: string;
+  /** Street address of the HQ — optional, shown under the city in the deck. */
+  hqAddress: string;
   province: string;
   districts: string[];
   status: AgencyStatus;
@@ -684,6 +687,7 @@ function AgencyModal({
     code: agency?.code ?? "",
     fullName: agency?.fullName ?? "",
     headquarters: agency?.headquarters ?? "",
+    hqAddress: agency?.hqAddress ?? "",
     province: agency?.province ?? "",
     districts: agency?.jurisdictionDistricts ?? [],
     status: agency?.status ?? "standby",
@@ -792,6 +796,7 @@ function AgencyModal({
       code: form.code.trim().toUpperCase(),
       fullName: form.fullName.trim(),
       headquarters: form.headquarters.trim() || form.districts[0],
+      hqAddress: form.hqAddress.trim(),
       controlHotline: form.controlHotline.trim(),
       dispatchEmail: form.dispatchEmail.trim(),
       webhookUrl: form.webhookUrl.trim(),
@@ -1059,6 +1064,21 @@ function AgencyModal({
               loads here.
             </p>
           ) : null}
+        </div>
+        <div className="space-y-1.5">
+          <label htmlFor="na-hq-addr" className={labelClass}>
+            HQ Street Address{" "}
+            <span className="font-medium normal-case text-slate-400">
+              (optional)
+            </span>
+          </label>
+          <input
+            id="na-hq-addr"
+            value={form.hqAddress}
+            onChange={(e) => set("hqAddress", e.target.value)}
+            placeholder="e.g. Plot 422-C, Ferozepur Road, Civil Lines, Gujranwala"
+            className={inputClass}
+          />
         </div>
         <div className="space-y-1.5">
           <span className={labelClass}>Jurisdiction Districts</span>
@@ -2272,6 +2292,9 @@ function AgencyRow({
   onToggleReports: () => void;
 }) {
   const reportsOn = agency.reportsEnabled !== false;
+  /* Coverage = declared jurisdiction + districts where a desk actually runs,
+     so a deployed desk still counts even while the declared list is empty. */
+  const cityCount = agencyCoverageDistricts(agency).length;
   return (
     <li>
       <div
@@ -2299,12 +2322,12 @@ function AgencyRow({
             />
           )}
           <span
-            title={`${agency.jurisdictionDistricts.length} cit${
-              agency.jurisdictionDistricts.length === 1 ? "y" : "ies"
+            title={`${cityCount} cit${
+              cityCount === 1 ? "y" : "ies"
             } / districts under ${agency.code}`}
             className="shrink-0 font-mono text-[10px] font-bold tabular-nums text-slate-500"
           >
-            {agency.jurisdictionDistricts.length} Cities
+            {cityCount} Cities
           </span>
         </button>
         {/* Report-intake switch — green means citizen complaints still route
@@ -3078,7 +3101,7 @@ export default function DepartmentManager() {
             a.code.toLowerCase().includes(query) ||
             a.fullName.toLowerCase().includes(query) ||
             a.headquarters.toLowerCase().includes(query) ||
-            a.jurisdictionDistricts.some((d) => d.toLowerCase().includes(query))
+            agencyCoverageDistricts(a).some((d) => d.toLowerCase().includes(query))
         );
         return agencies.length === sector.agencies.length
           ? sector
@@ -3208,6 +3231,7 @@ export default function DepartmentManager() {
       code: data.code,
       fullName: data.fullName,
       headquarters: data.headquarters,
+      hqAddress: data.hqAddress || undefined,
       descriptor: `Covering ${data.districts.join(", ")}`,
       province: data.province,
       jurisdictionDistricts: data.districts,
@@ -3241,6 +3265,7 @@ export default function DepartmentManager() {
       ...a,
       fullName: data.fullName,
       headquarters: data.headquarters,
+      hqAddress: data.hqAddress || undefined,
       descriptor: `Covering ${data.districts.join(", ")}`,
       province: data.province,
       jurisdictionDistricts: data.districts,
@@ -3896,15 +3921,17 @@ export default function DepartmentManager() {
                     Jurisdiction
                   </p>
                   <p className="mt-1 text-xs font-bold text-slate-900">
-                    {selected.agency.jurisdictionDistricts.length}{" "}
-                    {selected.agency.jurisdictionDistricts.length === 1 ? "City" : "Cities"}{" "}
+                    {agencyCoverageDistricts(selected.agency).length}{" "}
+                    {agencyCoverageDistricts(selected.agency).length === 1
+                      ? "City"
+                      : "Cities"}{" "}
                     / Districts
                   </p>
                   <p
-                    title={selected.agency.jurisdictionDistricts.join(", ")}
+                    title={agencyCoverageDistricts(selected.agency).join(", ")}
                     className="mt-0.5 truncate text-[11px] font-medium text-slate-500"
                   >
-                    {selected.agency.jurisdictionDistricts.join(", ")}
+                    {agencyCoverageDistricts(selected.agency).join(", ") || "No district on record"}
                   </p>
                 </div>
                 <div className="min-w-0">
@@ -3946,8 +3973,8 @@ export default function DepartmentManager() {
                       {telemetry.servedDistricts}
                     </p>
                     <p className="mt-2 text-[11px] font-medium text-slate-400">
-                      of {selected.agency.jurisdictionDistricts.length} under
-                      jurisdiction
+                      of {agencyCoverageDistricts(selected.agency).length} in
+                      the agency&apos;s coverage
                     </p>
                   </div>
                   <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-xs">

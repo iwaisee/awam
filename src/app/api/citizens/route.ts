@@ -4,26 +4,29 @@ import {
   listCitizenAdminStates,
   updateCitizenAdminState,
 } from "@/lib/citizensDb";
+import { listCitizenUsers } from "@/lib/auth/usersDb";
 import {
   deriveCitizenProfiles,
   type CitizenStanding,
 } from "@/lib/citizenProfiles";
 
 /* Citizen ledger for the admin console. Citizens are DERIVED from the real
-   reports ledger (a citizen = the name/phone behind one or more submissions),
-   merged with the admin governance state stored in the citizen_admin table.
-   GET returns the derived profiles; PATCH persists a governance action
-   (badge override, score modifier, suspend/reactivate, blacklist). */
+   reports ledger (a citizen = the name/phone behind one or more submissions)
+   and merged with the registered accounts in the citizen_users table, plus
+   the admin governance state stored in citizen_admin. GET returns the merged
+   profiles; PATCH persists a governance action (badge override, score
+   modifier, suspend/reactivate, blacklist). */
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function GET() {
-  const [reports, adminStates] = await Promise.all([
+  const [reports, adminStates, accounts] = await Promise.all([
     listReports(),
     listCitizenAdminStates(),
+    listCitizenUsers(),
   ]);
-  const profiles = deriveCitizenProfiles(reports, adminStates);
+  const profiles = deriveCitizenProfiles(reports, adminStates, accounts);
   return NextResponse.json(profiles);
 }
 

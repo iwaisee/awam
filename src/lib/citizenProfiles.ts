@@ -1,10 +1,12 @@
 import type { IncidentReport } from "@/types/civic";
+import { normalizePhoneDigits } from "@/lib/auth/identifiers";
 
 /* Citizen ledger derivation. There is no dedicated citizens table — a citizen
    is the named/phone-identified submitter behind one or more rows of the real
-   reports ledger. Profiles are aggregated server-side from `/api/reports`
-   rows plus the admin governance state (citizen_admin table). Client-safe:
-   no Postgres imports here. */
+   reports ledger, merged with the registered accounts from citizen_users.
+   Profiles are aggregated server-side from `/api/reports` rows plus the admin
+   governance state (citizen_admin table). Client-safe: no Postgres imports
+   here (identifiers.ts is pure functions). */
 
 export type CitizenStanding = "active" | "suspended";
 export type IncidentTone = "emerald" | "amber" | "rose" | "sky";
@@ -48,6 +50,29 @@ export interface CitizenProfile {
   memberSince: string;
   lastActive: string;
   incidents: CitizenIncident[];
+  /** Registered-account linkage — empty strings / false when this profile was
+      derived purely from report rows and the citizen never signed up. */
+  userId: string;
+  email: string;
+  emailVerified: boolean;
+  registered: boolean;
+  registeredAt: string;
+  /** Cloudinary portrait on the account; "" renders the initials monogram. */
+  avatarUrl: string;
+}
+
+/** Structural slice of a registered citizen account (lib/auth/usersDb.ts).
+    Kept structural so this module never imports the server-only store. */
+export interface RegisteredCitizenAccount {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  phoneDigits: string;
+  district: string;
+  avatarUrl: string;
+  emailVerified: boolean;
+  createdAt: string;
 }
 
 export interface CitizenAdminState {
@@ -109,15 +134,19 @@ const initialsOf = (name: string): string =>
 const truncate = (text: string, max: number): string =>
   text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text;
 
-/** Group ledger rows into per-citizen buckets. A citizen is identified by
-    normalized phone digits; submissions without a phone fall back to the
-    submitted name, and fully anonymous rows share one bucket. */
+/** Group ledger rows into per-citizen buckets and merge the registered
+    accounts on top. A report bucket is identified by normalized phone digits;
+    submissions without a phone fall back to the submitted name, and fully
+    anonymous rows share one bucket. */
 export function deriveCitizenProfiles(
   reports: IncidentReport[],
   adminStates: Map<string, CitizenAdminState>,
+  accounts: readonly RegisteredCitizenAccount[] = [],
 ): CitizenProfile[] {
   interface Bucket {
     reports: IncidentReport[];
+    /** Registered account merged into this citizen, when one matches. */
+    account?: RegisteredCitizenAccount;
   }
   const buckets = new Map<string, Bucket>();
 
@@ -131,27 +160,68 @@ export function deriveCitizenProfiles(
     buckets.set(key, bucket);
   }
 
+  /* Merge registered accounts into the ledger. A bucket matches when the
+     ledger attributed a filing to the account (user_id — authoritative, even
+     if the submitted phone differs) or when a submitted phone canonicalises
+     to the account's digits. Matched buckets keep their ledger key so stored
+     citizen_admin governance stays attached; accounts with no matching reports
+     become standalone zero-report profiles keyed user:<id>. */
+  const bucketByUserId = new Map<string, Bucket>();
+  for (const bucket of buckets.values()) {
+    for (const report of bucket.reports) {
+      if (report.user_id && !bucketByUserId.has(report.user_id)) {
+        bucketByUserId.set(report.user_id, bucket);
+      }
+    }
+  }
+  const bucketByDigits = new Map<string, Bucket>();
+  for (const [key, bucket] of buckets) {
+    if (!key.startsWith("tel:")) continue;
+    const canon = normalizePhoneDigits(key.slice(4));
+    if (canon && !bucketByDigits.has(canon)) bucketByDigits.set(canon, bucket);
+  }
+  for (const account of accounts) {
+    const bucket =
+      bucketByUserId.get(account.id) ??
+      (account.phoneDigits
+        ? bucketByDigits.get(account.phoneDigits)
+        : undefined);
+    if (bucket) bucket.account = account;
+    else buckets.set(`user:${account.id}`, { reports: [], account });
+  }
+
   const profiles: CitizenProfile[] = [];
   for (const [key, bucket] of buckets) {
     const rows = [...bucket.reports].sort(
       (a, b) => Date.parse(b.created_at) - Date.parse(a.created_at),
     );
+    const account = bucket.account;
 
     const admin = adminStates.get(key) ?? DEFAULT_ADMIN_STATE;
 
-    // District = most frequent city among the citizen's reports (tie → latest).
+    // District = the account's registered home district, else the most
+    // frequent city among the citizen's reports (tie → latest).
     const cityCounts = new Map<string, number>();
     rows.forEach((r) =>
       cityCounts.set(r.city_name, (cityCounts.get(r.city_name) ?? 0) + 1),
     );
     const district =
-      [...cityCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "Unknown";
+      account?.district.trim() ||
+      [...cityCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ||
+      "Unknown";
 
-    // Latest non-empty values win for contact/location fields.
-    const latest = rows[0];
-    const phone = rows.find((r) => r.citizen_phone.trim() !== "")?.citizen_phone ?? "";
+    // Registered identity wins; latest non-empty report values fill the gaps.
+    const phone =
+      (account?.phone ? account.phone : "") ||
+      rows.find((r) => r.citizen_phone.trim() !== "")?.citizen_phone ||
+      "";
     const area = rows.find((r) => r.area_name.trim() !== "")?.area_name ?? "—";
-    const name = rows.find((r) => r.citizen_name.trim() !== "")?.citizen_name ?? "Anonymous";
+    const name =
+      account?.name.trim() ||
+      rows.find((r) => r.citizen_name.trim() !== "")?.citizen_name ||
+      "Anonymous";
+    const memberSince = account?.createdAt ?? rows[rows.length - 1].created_at;
+    const lastActive = rows[0]?.created_at ?? account?.createdAt ?? memberSince;
 
     const reported = rows.length;
     const resolved = rows.filter((r) => r.status === "resolved").length;
@@ -193,11 +263,23 @@ export function deriveCitizenProfiles(
       accuracy: reported > 0 ? Math.round((resolved / reported) * 100) : 0,
       upvotes,
       score,
-      memberSince: rows[rows.length - 1].created_at,
-      lastActive: latest.created_at,
+      memberSince,
+      lastActive,
       incidents,
+      userId: account?.id ?? "",
+      email: account?.email ?? "",
+      emailVerified: account?.emailVerified ?? false,
+      registered: account !== undefined,
+      registeredAt: account?.createdAt ?? "",
+      avatarUrl: account?.avatarUrl ?? "",
     });
   }
 
-  return profiles.sort((a, b) => b.reported - a.reported);
+  /* Zero-report accounts sort after active submitters, newest registration
+     first, so the ledger leads with citizens who actually file. */
+  return profiles.sort(
+    (a, b) =>
+      b.reported - a.reported ||
+      Date.parse(b.lastActive) - Date.parse(a.lastActive),
+  );
 }

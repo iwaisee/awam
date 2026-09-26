@@ -14,6 +14,7 @@ import {
   Clock,
   FileText,
   IdCard,
+  Mail,
   MessageCircle,
   MessageSquare,
   RotateCcw,
@@ -88,13 +89,35 @@ const formatDate = (iso: string): string =>
 
 /* Channel markers — the reporting wizard captures name + phone only, so the
    WhatsApp/SMS channels stay neutral until channel verification exists and
-   CNIC lights up solely through a manual admin badge override. */
+   CNIC lights up solely through a manual admin badge override. The email chip
+   reflects the registered account's address: amber until verification. */
 function VerificationChips({ citizen }: { citizen: CitizenProfile }) {
   const base = "inline-flex items-center rounded-full p-1 ring-1";
   const off = "bg-white ring-slate-200";
   const cnicOn = citizen.badgeOverride;
+  const emailOn = citizen.email.trim() !== "";
   return (
     <span className="flex items-center gap-1">
+      {emailOn && (
+        <span
+          className={`${base} ${
+            citizen.emailVerified
+              ? "bg-emerald-50 ring-emerald-200"
+              : "bg-amber-50 ring-amber-200"
+          }`}
+          title={
+            citizen.emailVerified
+              ? "Email verified"
+              : "Email on file — verification pending"
+          }
+        >
+          <Mail
+            className={`h-3 w-3 ${
+              citizen.emailVerified ? "text-emerald-600" : "text-amber-500"
+            }`}
+          />
+        </span>
+      )}
       <span className={`${base} ${off}`} title="WhatsApp channel not verified">
         <MessageCircle className="h-3 w-3 text-slate-300" />
       </span>
@@ -115,10 +138,12 @@ function VerificationChips({ citizen }: { citizen: CitizenProfile }) {
   );
 }
 
-/* Segment tabs — identity signals the backend actually holds: the admin
-   badge override, its absence, and sanctions. */
+/* Segment tabs — identity signals the backend actually holds: the registered
+   citizen_users accounts, the admin badge override, its absence, and
+   sanctions. */
 const SEGMENTS = [
   { id: "all", label: "All Citizens" },
+  { id: "registered", label: "Registered" },
   { id: "badged", label: "Badge Granted" },
   { id: "unbadged", label: "No Badge" },
   { id: "flagged", label: "Flagged / Suspended" },
@@ -231,6 +256,7 @@ export default function UsersView() {
       .sort((a, b) => b.count - a.count);
     return {
       total,
+      registered: citizens.filter((c) => c.registered).length,
       badged: citizens.filter((c) => c.badgeOverride).length,
       reported,
       resolved,
@@ -245,6 +271,7 @@ export default function UsersView() {
   const segCounts = useMemo(
     () => ({
       all: citizens.length,
+      registered: citizens.filter((c) => c.registered).length,
       badged: citizens.filter((c) => c.badgeOverride).length,
       unbadged: citizens.filter((c) => !c.badgeOverride).length,
       flagged: citizens.filter(
@@ -309,10 +336,11 @@ export default function UsersView() {
       const localPhone = c.phone.replace(/\D/g, "").replace(/^92/, "");
       if (
         q &&
-        !`${c.name} ${c.id} ${c.phone}`.toLowerCase().includes(q) &&
+        !`${c.name} ${c.id} ${c.phone} ${c.email}`.toLowerCase().includes(q) &&
         !(qDigits && localPhone.includes(qDigits))
       )
         return false;
+      if (segment === "registered" && !c.registered) return false;
       if (segment === "badged" && !c.badgeOverride) return false;
       if (segment === "unbadged" && c.badgeOverride) return false;
       if (
@@ -351,12 +379,18 @@ export default function UsersView() {
             {stats.total}
           </p>
           <p className="mt-0.5 text-xs font-medium text-slate-500">
-            Citizens behind filed reports
+            Registered accounts + report submitters
           </p>
-          <span className="mt-3 inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
-            <BadgeCheck className="h-3 w-3" />
-            {stats.badged} Badge Granted
-          </span>
+          <div className="mt-3 flex flex-wrap items-center gap-1.5">
+            <span className="inline-flex items-center gap-1 rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-bold text-sky-700">
+              <IdCard className="h-3 w-3" />
+              {stats.registered} Registered Accounts
+            </span>
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+              <BadgeCheck className="h-3 w-3" />
+              {stats.badged} Badge Granted
+            </span>
+          </div>
         </div>
 
         {/* District participation share */}
@@ -469,7 +503,7 @@ export default function UsersView() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               aria-label="Search citizens"
-              placeholder="Search citizen by name or phone..."
+              placeholder="Search citizen by name, phone or email..."
               className="w-full rounded-xl border border-slate-200/80 bg-slate-50 py-2 pl-10 pr-4 text-xs text-slate-700 placeholder:text-slate-400 focus:border-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-700/20"
             />
           </div>
@@ -547,8 +581,8 @@ export default function UsersView() {
               Citizen Ledger
             </h2>
             <p className="mt-0.5 text-xs text-slate-500">
-              Derived from the live reports ledger — reporting and endorsement
-              stats per citizen.
+              Registered accounts from the Neon citizen store, merged with
+              reporting and endorsement stats from the live reports ledger.
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -637,15 +671,28 @@ export default function UsersView() {
                   <tr key={c.key} className="border-t border-slate-100 align-middle transition-colors duration-150 hover:bg-slate-50/70">
                     <td className="px-5 py-3.5">
                       <div className="flex items-center gap-3">
-                        <span
-                          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-[11px] font-bold text-white ${c.tint}`}
-                        >
-                          {c.initials}
-                        </span>
+                        {c.avatarUrl ? (
+                          <img
+                            src={c.avatarUrl}
+                            alt=""
+                            className="h-9 w-9 shrink-0 rounded-xl object-cover"
+                          />
+                        ) : (
+                          <span
+                            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-[11px] font-bold text-white ${c.tint}`}
+                          >
+                            {c.initials}
+                          </span>
+                        )}
                         <p className="flex min-w-0 flex-wrap items-center gap-1.5">
                           <span className="truncate text-sm font-bold text-slate-900">
                             {c.name}
                           </span>
+                          {c.registered && (
+                            <span className="shrink-0 rounded bg-sky-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-sky-800 ring-1 ring-sky-200">
+                              Registered
+                            </span>
+                          )}
                           {c.blacklisted ? (
                             <span className="shrink-0 rounded bg-rose-700 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white">
                               Banned
@@ -673,6 +720,14 @@ export default function UsersView() {
                         >
                           {c.phone || "No phone captured"}
                         </p>
+                        {c.email && (
+                          <p
+                            className="mt-0.5 max-w-[190px] truncate font-mono text-[11px] font-medium text-slate-500"
+                            title={c.email}
+                          >
+                            {c.email}
+                          </p>
+                        )}
                         <div className="mt-1.5">
                           <VerificationChips citizen={c} />
                         </div>
@@ -765,7 +820,7 @@ export default function UsersView() {
               Syncing citizen ledger…
             </p>
             <p className="max-w-sm text-xs font-medium text-slate-400">
-              Deriving citizen profiles from the live reports database.
+              Merging registered accounts and report submitters from Neon.
             </p>
           </div>
         )}
@@ -800,9 +855,9 @@ export default function UsersView() {
               No citizen records yet
             </p>
             <p className="max-w-sm text-xs font-medium text-slate-400">
-              Citizens appear here automatically as soon as reports are filed
-              through the public reporting wizard — no manual registration
-              needed.
+              Registered citizen accounts and report submitters appear here
+              automatically — sign-ups and wizard filings both need no manual
+              registration.
             </p>
           </div>
         )}
@@ -960,18 +1015,27 @@ function ProfileDrawer({
 
         {/* Identity block — avatar straddles the cover edge */}
         <div className="relative -mt-9 shrink-0 px-6 pb-5">
-          <span
-            className={`flex h-[72px] w-[72px] items-center justify-center rounded-2xl text-xl font-bold text-white shadow-lg ring-4 ring-white ${citizen.tint}`}
-          >
-            {citizen.initials}
-          </span>
+          {citizen.avatarUrl ? (
+            <img
+              src={citizen.avatarUrl}
+              alt=""
+              className="h-[72px] w-[72px] rounded-2xl object-cover shadow-lg ring-4 ring-white"
+            />
+          ) : (
+            <span
+              className={`flex h-[72px] w-[72px] items-center justify-center rounded-2xl text-xl font-bold text-white shadow-lg ring-4 ring-white ${citizen.tint}`}
+            >
+              {citizen.initials}
+            </span>
+          )}
           <h2 className="font-heading mt-3 truncate text-xl font-bold tracking-tight text-slate-900">
             {citizen.name}
           </h2>
           <p className="mt-1 flex flex-wrap items-center gap-x-2 text-[11px] font-medium text-slate-400">
             <span className="inline-flex items-center gap-1">
               <Clock className="h-3 w-3" />
-              First report {formatDate(citizen.memberSince)}
+              {citizen.registered ? "Member since" : "First report"}{" "}
+              {formatDate(citizen.memberSince)}
             </span>
             <span className="text-slate-300">•</span>
             <span>Last active {relativeLabel(citizen.lastActive)}</span>
@@ -1105,12 +1169,41 @@ function ProfileDrawer({
                       >
                         {citizen.blacklisted
                           ? "Number blacklisted — sign-ups blocked"
-                          : "Captured at report submission — channel verification pending"}
+                          : citizen.registered
+                            ? "Captured at signup — channel verification pending"
+                            : "Captured at report submission — channel verification pending"}
                       </span>
                       <span className="mt-1.5 flex justify-end">
                         <VerificationChips citizen={citizen} />
                       </span>
                     </>
+                  )}
+                </dd>
+              </div>
+              <div className="flex items-start justify-between gap-4 py-2.5">
+                <dt className="shrink-0 font-medium text-slate-400">Email</dt>
+                <dd className="text-right">
+                  {citizen.email ? (
+                    <>
+                      <span className="font-mono font-semibold text-slate-800">
+                        {citizen.email}
+                      </span>
+                      <span
+                        className={`mt-0.5 block text-[10px] font-bold ${
+                          citizen.emailVerified
+                            ? "text-emerald-600"
+                            : "text-amber-600"
+                        }`}
+                      >
+                        {citizen.emailVerified
+                          ? "Verified"
+                          : "On file from signup — verification pending"}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="font-mono font-semibold text-slate-400">
+                      No account — ledger-derived citizen
+                    </span>
                   )}
                 </dd>
               </div>
@@ -1127,7 +1220,9 @@ function ProfileDrawer({
                 </dd>
               </div>
               <div className="flex items-center justify-between gap-4 py-2.5 last:pb-0">
-                <dt className="font-medium text-slate-400">Reporting Since</dt>
+                <dt className="font-medium text-slate-400">
+                  {citizen.registered ? "Member Since" : "Reporting Since"}
+                </dt>
                 <dd className="font-semibold text-slate-800">
                   {formatDate(citizen.memberSince)}
                 </dd>
@@ -1138,10 +1233,12 @@ function ProfileDrawer({
           {/* Section 3 — recent reports & endorsements (final section) */}
           <section className="px-6 py-5">
             <SectionHeading icon={FileText}>Recent Reports</SectionHeading>
-            <p className="mt-1.5 text-[10px] font-medium text-slate-400">
-              Latest {citizen.incidents.length} of {citizen.reported} filed —
-              click a ticket chip to track that report.
-            </p>
+            {citizen.reported > 0 && (
+              <p className="mt-1.5 text-[10px] font-medium text-slate-400">
+                Latest {citizen.incidents.length} of {citizen.reported} filed —
+                click a ticket chip to track that report.
+              </p>
+            )}
             {citizen.incidents.length > 0 ? (
               <ul className="mt-3 space-y-4">
                 {citizen.incidents.map((inc, i) => (

@@ -103,6 +103,17 @@ async function selectUser(
   return rows[0] ? rowToUser(rows[0]) : null;
 }
 
+/** Every registered account, oldest first. Display-safe fields only — the
+    password hash never leaves this module. Feeds the admin citizen ledger so
+    accounts are inspectable even before they file a report. */
+export async function listCitizenUsers(): Promise<CitizenUser[]> {
+  await ensureSchema();
+  const rows = await query<UserRow>(
+    `SELECT ${USER_COLUMNS} FROM citizen_users ORDER BY created_at ASC`,
+  );
+  return rows.map(rowToUser);
+}
+
 export function getCitizenUserById(id: string): Promise<CitizenUser | null> {
   return selectUser("id = $1", [id]);
 }
